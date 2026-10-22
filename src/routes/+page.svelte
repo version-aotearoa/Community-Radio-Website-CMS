@@ -5,6 +5,7 @@
 	import { live, startLivePolling } from '$lib/stores/live';
 	import { liveArtOf } from '$lib/api/live';
 	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { eventTypeLabel } from '$lib/eventTypes';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
@@ -49,8 +50,8 @@
 			.replace(/\s/g, ' ');
 	}
 
-	function playEpisode(show: { show_id: string; broadcast_id: string; title: string; date: string; replay_url: string | null; replay_unavailable?: boolean; art?: string | null; show_image?: string | null; dj_name?: string | null }) {
-		if (!show.replay_url || show.replay_unavailable) return;
+	function playEpisode(show: { show_id: string; broadcast_id: string; title: string; date: string; replay_url: string | null; art?: string | null; show_image?: string | null; dj_name?: string | null }) {
+		if (!show.replay_url || $unavailableReplays.has(show.replay_url)) return;
 		playMedia({
 			url: show.replay_url,
 			title: show.title,
@@ -67,7 +68,13 @@
 		return episodeArtOrDefault(f.broadcast_id, f, { image: f.image });
 	}
 
-	onMount(() => startLivePolling());
+	onMount(() => {
+		startLivePolling();
+		probeReplayAvailability([
+			...data.latest.map((s) => s.replay_url),
+			...data.featured.map((s) => s.replay_url)
+		]);
+	});
 </script>
 
 <svelte:head>
@@ -139,7 +146,7 @@
 							</svg>
 						</div>
 					{/if}
-					{#if show.replay_unavailable}
+					{#if show.replay_url && $unavailableReplays.has(show.replay_url)}
 						<span
 							class="sticker dark art-sticker unavailable"
 							title="This recording is no longer available"

@@ -10,7 +10,6 @@ import {
 	todayStr,
 	zonedNow
 } from '$lib/server/shows';
-import { annotateReplayStatus } from '$lib/server/replayStatus';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, platform }) => {
@@ -19,8 +18,7 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	if (!show) error(404, 'Show not found');
 
 	await ensureBroadcasts(db, show);
-	const rows = await getBroadcasts(db, show.id);
-	const broadcasts = await annotateReplayStatus(rows);
+	const broadcasts = await getBroadcasts(db, show.id);
 	const tracks = await getBroadcastTracksMap(db, broadcasts.map((b) => b.id));
 
 	const user = locals.user ?? null;

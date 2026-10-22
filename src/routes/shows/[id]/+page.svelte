@@ -8,6 +8,7 @@
 	import { playback, playMedia, requestSetPlaying, streamPlaying } from '$lib/stores/player';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
 	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
 
@@ -17,10 +18,9 @@
 	const upcoming = $derived(data.upcoming);
 	const past = $derived(data.past);
 
-	// Fresh server data on every visit — the DB is the source of truth
-	// (back/forward navigation can otherwise restore a stale load snapshot,
-	// e.g. a follow that was toggled then left the page).
+	// Replay availability is probed after paint (never during render).
 	onMount(() => {
+		probeReplayAvailability([...data.upcoming, ...data.past].map((b) => b.replay_url));
 		// Deferred past the navigation's microtasks: an immediate invalidateAll
 		// aborts the in-flight navigation before SvelteKit resets scroll to top.
 		setTimeout(() => void invalidateAll(), 0);
@@ -157,8 +157,8 @@
 		return `weeks ${weeks.join(' & ')}`;
 	}
 
-	function toggleReplay(b: { id: string; replay_url: string | null; replay_unavailable?: boolean; date: string }) {
-		if (!b.replay_url || b.replay_unavailable) return;
+	function toggleReplay(b: { id: string; replay_url: string | null; date: string }) {
+		if (!b.replay_url || $unavailableReplays.has(b.replay_url)) return;
 		if (replayActive(b.replay_url)) {
 			requestSetPlaying(false);
 			return;
@@ -411,7 +411,7 @@
 								{/if}
 							</header>
 							<div class="replay">
-								{#if b.replay_unavailable}
+								{#if b.replay_url && $unavailableReplays.has(b.replay_url)}
 									<span
 										class="replay-unavailable"
 										title="This recording is no longer available"

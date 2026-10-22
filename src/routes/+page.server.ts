@@ -1,6 +1,5 @@
 import { getUpcomingBroadcasts, zonedNow } from '$lib/server/shows';
 import { attachHearts, heartKeyOf, listNews, VR_ANON_COOKIE } from '$lib/server/news';
-import { annotateReplayStatus } from '$lib/server/replayStatus';
 import type { PageServerLoad } from './$types';
 
 export interface LatestShow {
@@ -9,8 +8,6 @@ export interface LatestShow {
 	date: string;
 	start_minutes: number;
 	replay_url: string | null;
-	/** Probed: the recording behind replay_url no longer serves audio. */
-	replay_unavailable: boolean;
 	art: string | null;
 	title: string;
 	show_image: string | null;
@@ -24,7 +21,6 @@ export interface FeaturedShow {
 	show_id: string;
 	date: string;
 	replay_url: string | null;
-	replay_unavailable: boolean;
 	art: string | null;
 	title: string;
 	image: string | null;
@@ -99,22 +95,19 @@ export const load: PageServerLoad = async ({ platform, locals, cookies }) => {
 			.all();
 		rows = fallback.results as unknown as FeaturedRow[];
 	}
-	const latest = await annotateReplayStatus(results as unknown as LatestShow[]);
-	const featured = await annotateReplayStatus(rows).then((annotated) =>
-		annotated.map((r) => ({
-			broadcast_id: r.broadcast_id,
-			show_id: r.show_id,
-			date: r.date,
-			replay_url: r.replay_url,
-			replay_unavailable: r.replay_unavailable,
-			art: r.art,
-			title: r.title,
-			image: r.show_image,
-			dj_name: r.dj_name,
-			kind: r.kind,
-			event_type: r.event_type
-		}))
-	);
+	const latest = results as unknown as LatestShow[];
+	const featured = rows.map((r) => ({
+		broadcast_id: r.broadcast_id,
+		show_id: r.show_id,
+		date: r.date,
+		replay_url: r.replay_url,
+		art: r.art,
+		title: r.title,
+		image: r.show_image,
+		dj_name: r.dj_name,
+		kind: r.kind,
+		event_type: r.event_type
+	}));
 
 	const news = await listNews(db, true);
 	const newsKey = heartKeyOf(locals.user?.id ?? null, cookies.get(VR_ANON_COOKIE) ?? null);
