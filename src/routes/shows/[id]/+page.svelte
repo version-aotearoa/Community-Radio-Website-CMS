@@ -7,7 +7,7 @@
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import { playback, playMedia, requestSetPlaying, streamPlaying } from '$lib/stores/player';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
-	import { episodeArtOrDefault, isReplayUnavailable } from '$lib/azuracast';
+	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
 
@@ -157,8 +157,8 @@
 		return `weeks ${weeks.join(' & ')}`;
 	}
 
-	function toggleReplay(b: { id: string; replay_url: string | null; date: string }) {
-		if (!b.replay_url || isReplayUnavailable(b.replay_url)) return;
+	function toggleReplay(b: { id: string; replay_url: string | null; replay_unavailable?: boolean; date: string }) {
+		if (!b.replay_url || b.replay_unavailable) return;
 		if (replayActive(b.replay_url)) {
 			requestSetPlaying(false);
 			return;
@@ -411,10 +411,10 @@
 								{/if}
 							</header>
 							<div class="replay">
-								{#if isReplayUnavailable(b.replay_url)}
+								{#if b.replay_unavailable}
 									<span
 										class="replay-unavailable"
-										title="This recording was hosted on a retired server and is no longer available"
+										title="This recording is no longer available"
 										>No longer available</span
 									>
 								{:else if b.replay_url}

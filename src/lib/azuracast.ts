@@ -6,21 +6,12 @@ const TRACK_ID_RE = /^[0-9a-f]{24}$/i;
 const DOWNLOAD_RE = /\/api\/station\/[\w-]+\/ondemand\/download\/([0-9a-f]{24})\b/i;
 
 /**
- * Origins of AzuraCast instances that no longer exist. Replay links stored
- * against these can never play again (the tracks live on the current host
- * under new ids), so the UI flags them instead of offering a broken player.
+ * Cache-busting suffix for proxied artwork. AzuraCast answers a missing art id
+ * with a redirect to a generic placeholder, and the /media proxy caches for a
+ * year — an id first requested through the wrong host would keep the
+ * placeholder forever. Bumping this abandons those poisoned cache keys.
  */
-const RETIRED_REPLAY_HOSTS = new Set(['stream.version.nz']);
-
-/** True when a stored replay URL points at a retired AzuraCast instance. */
-export function isReplayUnavailable(url: string | null | undefined): boolean {
-	if (!url) return false;
-	try {
-		return RETIRED_REPLAY_HOSTS.has(new URL(url).host.toLowerCase());
-	} catch {
-		return false;
-	}
-}
+const MEDIA_ART_VERSION = '2';
 
 /** Pull a 24-hex track id out of a bare id or an on-demand download link. */
 export function extractReplayTrackId(input: string): string | null {
@@ -41,7 +32,7 @@ export function replayPlayUrl(trackId: string): string {
  * `id` is a bare 24-hex track id (optionally already carrying a -timestamp).
  */
 export function replayArtUrl(trackId: string): string {
-	return `/media/${trackId}.jpg`;
+	return `/media/${trackId}.jpg?v=${MEDIA_ART_VERSION}`;
 }
 
 /** Art URL from a stored replay URL, or null if it has no valid track id. */
@@ -75,8 +66,7 @@ function isMediaPath(url: string): boolean {
  * - `b.art` set to a /media path -> used as-is (already CDN-cached).
  * - `b.art` set to any other URL -> proxied + cached via
  *   /media/ep/<broadcastId>/<urlhash>.jpg (hash busts the cache on change).
- * - otherwise falls back to the replay-derived art (unless the replay link
- *   points at a retired server, which only yields a placeholder upstream).
+ * - otherwise falls back to the replay-derived art.
  */
 export function episodeArtUrl(
 	broadcastId: string | null | undefined,
@@ -88,7 +78,6 @@ export function episodeArtUrl(
 		if (broadcastId) return `/media/ep/${broadcastId}/${artUrlHash(art)}.jpg`;
 		return art;
 	}
-	if (isReplayUnavailable(b.replay_url)) return null;
 	return replayArtFromUrl(b.replay_url);
 }
 
@@ -121,5 +110,5 @@ const ART_FILE_RE = /([0-9a-f]{24}(?:-\d+)?)\.(?:jpg|jpeg|png|webp|avif)$/i;
 export function proxiedArtFromUrl(url: string | null | undefined): string | null {
 	if (!url) return null;
 	const m = url.trim().match(ART_FILE_RE);
-	return m ? `/media/${m[1]}.jpg` : url;
+	return m ? `/media/${m[1]}.jpg?v=${MEDIA_ART_VERSION}` : url;
 }

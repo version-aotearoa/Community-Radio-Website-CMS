@@ -20,7 +20,24 @@ export const GET: RequestHandler = async ({ params, fetch: cfFetch }) => {
 
 	// Bare track ids upstream need no extension (the .jpg form 405s).
 	const upstreamFile = BARE_RE.test(file.replace(/\.\w+$/, '')) ? file.replace(/\.\w+$/, '') : file;
-	const upstream = await cfFetch(`${UPSTREAM_BASE}/${upstreamFile}`);
+
+	/**
+	 * AzuraCast answers an unknown art id — including a stale `<id>-<timestamp>`
+	 * left over from a previous instance — with a redirect to a generic
+	 * placeholder. Never cache that as the recording's artwork: fall back to the
+	 * bare id (re-imported artwork keeps the id, not the timestamp), and only
+	 * 404 when even that has no artwork.
+	 */
+	const fetchArt = async (name: string) => cfFetch(`${UPSTREAM_BASE}/${name}`);
+
+	let upstream = await fetchArt(upstreamFile);
+	if (upstream.redirected) {
+		const bare = upstreamFile.replace(/\.\w+$/, '').replace(/-\d+$/, '');
+		if (BARE_RE.test(bare)) {
+			upstream = await fetchArt(bare);
+		}
+	}
+	if (upstream.redirected) error(404, 'Not found');
 	if (!upstream.ok) error(404, 'Not found');
 
 	return new Response(upstream.body, {

@@ -12,7 +12,7 @@
 		streamPlaying
 	} from '$lib/stores/player';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
-	import { episodeArtOrDefault, isReplayUnavailable } from '$lib/azuracast';
+	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
 
@@ -215,7 +215,7 @@
 	}
 
 	function toggleReplay() {
-		if (!broadcast.replay_url || isReplayUnavailable(broadcast.replay_url)) return;
+		if (!broadcast.replay_url || broadcast.replay_unavailable) return;
 		if (replayActive()) {
 			requestSetPlaying(false);
 			return;
@@ -318,10 +318,10 @@
 				</svg>
 			</span>
 		{/if}
-		{#if isReplayUnavailable(broadcast.replay_url)}
+		{#if broadcast.replay_unavailable}
 			<span
 				class="replay-unavailable"
-				title="This recording was hosted on a retired server and is no longer available"
+				title="This recording is no longer available"
 				>No longer available</span
 			>
 		{:else if broadcast.replay_url}
