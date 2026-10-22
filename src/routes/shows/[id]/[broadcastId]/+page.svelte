@@ -13,6 +13,7 @@
 	} from '$lib/stores/player';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
 	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
 
@@ -25,10 +26,9 @@
 	const artFallback = $derived(show.image ?? show.dj_image ?? null);
 	const artUrl = $derived(episodeArtOrDefault(broadcast.id, broadcast, show));
 
-	// Fresh server data on every visit — the DB is the source of truth
-	// (back/forward navigation can otherwise restore a stale load snapshot,
-	// e.g. a saved-bookmark that was toggled then left the page).
+	// Replay availability is probed after paint (never during render).
 	onMount(() => {
+		probeReplayAvailability([data.broadcast.replay_url]);
 		// Deferred past the navigation's microtasks: an immediate invalidateAll
 		// aborts the in-flight navigation before SvelteKit resets scroll to top.
 		setTimeout(() => void invalidateAll(), 0);
@@ -215,7 +215,7 @@
 	}
 
 	function toggleReplay() {
-		if (!broadcast.replay_url || broadcast.replay_unavailable) return;
+		if (!broadcast.replay_url || $unavailableReplays.has(broadcast.replay_url)) return;
 		if (replayActive()) {
 			requestSetPlaying(false);
 			return;
@@ -318,7 +318,7 @@
 				</svg>
 			</span>
 		{/if}
-		{#if broadcast.replay_unavailable}
+		{#if broadcast.replay_url && $unavailableReplays.has(broadcast.replay_url)}
 			<span
 				class="replay-unavailable"
 				title="This recording is no longer available"

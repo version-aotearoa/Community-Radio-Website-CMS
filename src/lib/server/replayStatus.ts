@@ -7,16 +7,19 @@
  * host keeps working until it is actually retired, so guessing from the origin
  * takes playable episodes offline.
  *
- * Probes are HEAD requests cached per isolate: a short TTL for failures so a
- * recovered file stops being flagged quickly, a longer one for successes.
+ * IMPORTANT: this must never run on the render path. Upstream HEADs can stall
+ * for seconds from a Worker (rate limits, blocked egress), and awaiting them
+ * during SSR timed out whole page loads. Pages render immediately and ask
+ * /api/replay-status; results are cached per isolate.
  */
 
 const AVAILABLE_TTL_MS = 10 * 60_000;
 const UNAVAILABLE_TTL_MS = 2 * 60_000;
-const PROBE_TIMEOUT_MS = 4000;
-const RETRY_DELAY_MS = 900;
+const PROBE_TIMEOUT_MS = 2500;
+const RETRY_DELAY_MS = 700;
 const MAX_CONCURRENCY = 4;
 const MAX_ENTRIES = 500;
+const DEFAULT_BUDGET_MS = 3000;
 
 interface CacheEntry {
 	unavailable: boolean;
@@ -34,13 +37,13 @@ function remember(url: string, unavailable: boolean): void {
 	cache.set(url, { unavailable, at: Date.now() });
 }
 
-async function probeOnce(url: string): Promise<{ unavailable: boolean } | null> {
+async function probeOnce(url: string, timeoutMs: number): Promise<{ unavailable: boolean } | null> {
 	let res: Response;
 	try {
 		res = await fetch(url, {
 			method: 'HEAD',
 			redirect: 'follow',
-			signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+			signal: AbortSignal.timeout(timeoutMs)
 		});
 	} catch {
 		return null; // network-level failure: could be a dead host OR a rate limit
@@ -55,7 +58,7 @@ async function probeOnce(url: string): Promise<{ unavailable: boolean } | null> 
 	return { unavailable: type.startsWith('text/html') };
 }
 
-async function probe(rawUrl: string): Promise<boolean> {
+async function probe(rawUrl: string, timeoutMs: number): Promise<boolean> {
 	let parsed: URL;
 	try {
 		parsed = new URL(rawUrl);
@@ -64,18 +67,21 @@ async function probe(rawUrl: string): Promise<boolean> {
 	}
 	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true;
 
-	const first = await probeOnce(parsed.href);
+	const first = await probeOnce(parsed.href, timeoutMs);
 	if (first) return first.unavailable;
 
 	// A single network failure is not evidence (AzuraCast rate-limits bursts and
 	// can reset connections under load). Only a repeated failure counts.
 	await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-	const second = await probeOnce(parsed.href);
+	const second = await probeOnce(parsed.href, timeoutMs);
 	return second ? second.unavailable : true;
 }
 
 /** True when the recording behind `url` does not serve audio right now. */
-export async function isReplayFileUnavailable(url: string): Promise<boolean> {
+export async function isReplayFileUnavailable(
+	url: string,
+	timeoutMs = PROBE_TIMEOUT_MS
+): Promise<boolean> {
 	const hit = cache.get(url);
 	if (hit) {
 		const ttl = hit.unavailable ? UNAVAILABLE_TTL_MS : AVAILABLE_TTL_MS;
@@ -85,7 +91,7 @@ export async function isReplayFileUnavailable(url: string): Promise<boolean> {
 	const pending = inFlight.get(url);
 	if (pending) return pending;
 
-	const run = probe(url)
+	const run = probe(url, timeoutMs)
 		.then((unavailable) => {
 			remember(url, unavailable);
 			return unavailable;
@@ -95,30 +101,34 @@ export async function isReplayFileUnavailable(url: string): Promise<boolean> {
 	return run;
 }
 
-/** Add `replay_unavailable` to rows, probing each distinct link once. */
-export async function annotateReplayStatus<T extends { replay_url: string | null }>(
-	rows: T[]
-): Promise<(T & { replay_unavailable: boolean })[]> {
-	const urls = [
-		...new Set(rows.map((r) => r.replay_url).filter((u): u is string => Boolean(u?.trim())))
-	];
-	const status = new Map<string, boolean>();
-
-	// Small pool: a show page can list a couple of dozen episodes, and firing
-	// them all at once gets rate-limited by AzuraCast (429) rather than answered.
+/**
+ * Probe as many URLs as fit in `budgetMs`; URLs that don't answer in time are
+ * simply absent from the result (unknown, never treated as missing).
+ */
+export async function probeReplayUrls(
+	urls: string[],
+	budgetMs = DEFAULT_BUDGET_MS
+): Promise<Map<string, boolean>> {
+	const unique = [...new Set(urls.filter((u) => Boolean(u?.trim())))];
+	const out = new Map<string, boolean>();
+	const deadline = Date.now() + budgetMs;
 	let cursor = 0;
+
 	const worker = async () => {
-		while (cursor < urls.length) {
-			const url = urls[cursor++];
-			status.set(url, await isReplayFileUnavailable(url));
+		while (cursor < unique.length) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) return;
+			const url = unique[cursor++];
+			const verdict = await Promise.race([
+				isReplayFileUnavailable(url, Math.min(PROBE_TIMEOUT_MS, remaining)),
+				new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining))
+			]);
+			if (verdict !== null) out.set(url, verdict);
 		}
 	};
-	await Promise.all(
-		Array.from({ length: Math.min(MAX_CONCURRENCY, urls.length) }, () => worker())
-	);
 
-	return rows.map((r) => ({
-		...r,
-		replay_unavailable: r.replay_url ? (status.get(r.replay_url) ?? false) : false
-	}));
+	await Promise.all(
+		Array.from({ length: Math.min(MAX_CONCURRENCY, unique.length) }, () => worker())
+	);
+	return out;
 }
