@@ -7,9 +7,10 @@ import {
 	matchLiveShow,
 	zonedNow
 } from '$lib/server/shows';
+import { AZURACAST_BASE } from '$lib/azuracast';
 import type { RequestHandler } from './$types';
 
-const AZURACAST = 'https://stream.version.nz/api/nowplaying';
+const AZURACAST = `${AZURACAST_BASE}/api/nowplaying`;
 
 /** Tolerant CORS: loopback/LAN dev origins (localhost vs [::1] vs 127.0.0.1). */
 const CORS = {

@@ -1,9 +1,26 @@
-export const AZURACAST_BASE = 'https://stream.version.nz';
+export const AZURACAST_BASE = 'https://stream.versionradio.live';
 export const AZURACAST_STATION_ID = '1';
 export const AZURACAST_STATION_SHORTCODE = 'version_radio';
 
 const TRACK_ID_RE = /^[0-9a-f]{24}$/i;
 const DOWNLOAD_RE = /\/api\/station\/[\w-]+\/ondemand\/download\/([0-9a-f]{24})\b/i;
+
+/**
+ * Origins of AzuraCast instances that no longer exist. Replay links stored
+ * against these can never play again (the tracks live on the current host
+ * under new ids), so the UI flags them instead of offering a broken player.
+ */
+const RETIRED_REPLAY_HOSTS = new Set(['stream.version.nz']);
+
+/** True when a stored replay URL points at a retired AzuraCast instance. */
+export function isReplayUnavailable(url: string | null | undefined): boolean {
+	if (!url) return false;
+	try {
+		return RETIRED_REPLAY_HOSTS.has(new URL(url).host.toLowerCase());
+	} catch {
+		return false;
+	}
+}
 
 /** Pull a 24-hex track id out of a bare id or an on-demand download link. */
 export function extractReplayTrackId(input: string): string | null {
@@ -58,7 +75,8 @@ function isMediaPath(url: string): boolean {
  * - `b.art` set to a /media path -> used as-is (already CDN-cached).
  * - `b.art` set to any other URL -> proxied + cached via
  *   /media/ep/<broadcastId>/<urlhash>.jpg (hash busts the cache on change).
- * - otherwise falls back to the replay-derived art.
+ * - otherwise falls back to the replay-derived art (unless the replay link
+ *   points at a retired server, which only yields a placeholder upstream).
  */
 export function episodeArtUrl(
 	broadcastId: string | null | undefined,
@@ -70,6 +88,7 @@ export function episodeArtUrl(
 		if (broadcastId) return `/media/ep/${broadcastId}/${artUrlHash(art)}.jpg`;
 		return art;
 	}
+	if (isReplayUnavailable(b.replay_url)) return null;
 	return replayArtFromUrl(b.replay_url);
 }
 

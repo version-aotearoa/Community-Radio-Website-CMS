@@ -7,7 +7,7 @@
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import { playback, playMedia, requestSetPlaying, streamPlaying } from '$lib/stores/player';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
-	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { episodeArtOrDefault, isReplayUnavailable } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
 
@@ -158,7 +158,7 @@
 	}
 
 	function toggleReplay(b: { id: string; replay_url: string | null; date: string }) {
-		if (!b.replay_url) return;
+		if (!b.replay_url || isReplayUnavailable(b.replay_url)) return;
 		if (replayActive(b.replay_url)) {
 			requestSetPlaying(false);
 			return;
@@ -411,7 +411,13 @@
 								{/if}
 							</header>
 							<div class="replay">
-								{#if b.replay_url}
+								{#if isReplayUnavailable(b.replay_url)}
+									<span
+										class="replay-unavailable"
+										title="This recording was hosted on a retired server and is no longer available"
+										>No longer available</span
+									>
+								{:else if b.replay_url}
 									<button class="replay-btn" class:playing={replayActive(b.replay_url)} onclick={() => toggleReplay(b)}>
 										{#if replayActive(b.replay_url)}
 											<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0zM15 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0z" fill="currentColor" /></svg>
@@ -756,6 +762,20 @@
 	.replay-btn.playing {
 		background: var(--vr-text);
 		color: var(--vr-black);
+	}
+
+	/* Retired-server replay: state it plainly instead of a button that 404s. */
+	.replay-unavailable {
+		display: inline-flex;
+		align-items: center;
+		border: 1px dashed var(--vr-line-muted);
+		color: var(--vr-faint);
+		padding: 0.4rem 0.9rem;
+		font-size: 0.75rem;
+		font-family: var(--vr-font-mono);
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		white-space: nowrap;
 	}
 
 	.view-show {

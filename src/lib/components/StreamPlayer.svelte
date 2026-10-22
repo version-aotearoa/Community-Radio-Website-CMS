@@ -15,9 +15,10 @@
 	} from '$lib/stores/player';
 	import { live, startLivePolling } from '$lib/stores/live';
 	import { liveArtOf } from '$lib/api/live';
+	import { AZURACAST_BASE, AZURACAST_STATION_SHORTCODE } from '$lib/azuracast';
 	import SeekControl from '$lib/components/SeekControl.svelte';
 
-	const STREAM_URL = 'https://stream.version.nz/hls/version_radio/live.m3u8';
+	const STREAM_URL = `${AZURACAST_BASE}/hls/${AZURACAST_STATION_SHORTCODE}/live.m3u8`;
 
 	let audioEl: HTMLAudioElement | undefined = $state();
 	let hls: import('hls.js').default | null = null;

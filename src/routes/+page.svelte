@@ -4,7 +4,7 @@
 	import { playMedia } from '$lib/stores/player';
 	import { live, startLivePolling } from '$lib/stores/live';
 	import { liveArtOf } from '$lib/api/live';
-	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { episodeArtOrDefault, isReplayUnavailable } from '$lib/azuracast';
 	import { eventTypeLabel } from '$lib/eventTypes';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
@@ -50,7 +50,7 @@
 	}
 
 	function playEpisode(show: { show_id: string; broadcast_id: string; title: string; date: string; replay_url: string | null; art?: string | null; show_image?: string | null; dj_name?: string | null }) {
-		if (!show.replay_url) return;
+		if (!show.replay_url || isReplayUnavailable(show.replay_url)) return;
 		playMedia({
 			url: show.replay_url,
 			title: show.title,
@@ -140,21 +140,29 @@
 						</div>
 					{/if}
 					{#if show.replay_url}
-						<span class="sticker dark art-sticker">Replay</span>
-						<button
-							class="card-play"
-							onclick={(e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								playEpisode(show);
-							}}
-							aria-label={`Play ${show.title} replay`}
-							title={`Play ${show.title} replay`}
-						>
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path d="M8 5.4v13.2a1 1 0 0 0 1.53.85l10.6-6.6a1 1 0 0 0 0-1.7L9.53 4.55A1 1 0 0 0 8 5.4z" fill="currentColor" />
-							</svg>
-						</button>
+						{#if isReplayUnavailable(show.replay_url)}
+							<span
+								class="sticker dark art-sticker unavailable"
+								title="This recording was hosted on a retired server and is no longer available"
+								>Unavailable</span
+							>
+						{:else}
+							<span class="sticker dark art-sticker">Replay</span>
+							<button
+								class="card-play"
+								onclick={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									playEpisode(show);
+								}}
+								aria-label={`Play ${show.title} replay`}
+								title={`Play ${show.title} replay`}
+							>
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path d="M8 5.4v13.2a1 1 0 0 0 1.53.85l10.6-6.6a1 1 0 0 0 0-1.7L9.53 4.55A1 1 0 0 0 8 5.4z" fill="currentColor" />
+								</svg>
+							</button>
+						{/if}
 					{/if}
 				</div>
 				<div class="showcard-meta mono">
@@ -480,6 +488,13 @@
 		position: absolute;
 		top: 0.75rem;
 		left: 0.75rem;
+	}
+
+	/* Retired-server replay: flag the card instead of offering a dead player. */
+	.art-sticker.unavailable {
+		background: #000;
+		color: var(--vr-faint);
+		border-color: var(--vr-line-muted);
 	}
 
 	.card-play {

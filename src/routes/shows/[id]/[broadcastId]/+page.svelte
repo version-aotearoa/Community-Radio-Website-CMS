@@ -12,7 +12,7 @@
 		streamPlaying
 	} from '$lib/stores/player';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
-	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { episodeArtOrDefault, isReplayUnavailable } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
 
@@ -215,7 +215,7 @@
 	}
 
 	function toggleReplay() {
-		if (!broadcast.replay_url) return;
+		if (!broadcast.replay_url || isReplayUnavailable(broadcast.replay_url)) return;
 		if (replayActive()) {
 			requestSetPlaying(false);
 			return;
@@ -318,7 +318,13 @@
 				</svg>
 			</span>
 		{/if}
-		{#if broadcast.replay_url}
+		{#if isReplayUnavailable(broadcast.replay_url)}
+			<span
+				class="replay-unavailable"
+				title="This recording was hosted on a retired server and is no longer available"
+				>No longer available</span
+			>
+		{:else if broadcast.replay_url}
 			<button class="replay-btn" class:playing={replayActive()} onclick={toggleReplay}>
 				{#if replayActive()}
 					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0zM15 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0z" fill="currentColor" /></svg>
@@ -744,6 +750,20 @@
 	.replay-btn.playing {
 		background: var(--vr-text);
 		color: var(--vr-black);
+	}
+
+	/* Retired-server replay: state it plainly instead of a button that 404s. */
+	.replay-unavailable {
+		display: inline-flex;
+		align-items: center;
+		border: 1px dashed var(--vr-line-muted);
+		color: var(--vr-faint);
+		font-family: var(--vr-font-mono);
+		font-size: 0.75rem;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		padding: 0.35rem 0.9rem;
+		white-space: nowrap;
 	}
 
 	@media (max-width: 640px) {
