@@ -1,13 +1,15 @@
 import { error } from '@sveltejs/kit';
 import { getShowWithDj, getTracklist, resolveBroadcastForShow } from '$lib/server/shows';
+import { annotateReplayStatus } from '$lib/server/replayStatus';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	const db = platform!.env.DB;
 	const show = await getShowWithDj(db, params.id);
 	if (!show) error(404, 'Show not found');
-	const broadcast = await resolveBroadcastForShow(db, show.id, params.broadcastId);
-	if (!broadcast) error(404, 'Broadcast not found');
+	const broadcastRow = await resolveBroadcastForShow(db, show.id, params.broadcastId);
+	if (!broadcastRow) error(404, 'Broadcast not found');
+	const [broadcast] = await annotateReplayStatus([broadcastRow]);
 	const tracks = await getTracklist(db, broadcast.id);
 
 	const user = locals.user ?? null;
