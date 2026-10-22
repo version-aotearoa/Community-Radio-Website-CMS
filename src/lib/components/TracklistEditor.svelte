@@ -4,7 +4,7 @@
 	import { Button } from '@svar-ui/svelte-core';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import { parseTracksCsv } from '$lib/csv';
-	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { episodeArtOrDefault, isReplayUnavailable } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import type { ShowRow, BroadcastRow, TrackRow } from '$lib/server/shows';
 
@@ -476,6 +476,11 @@
 		</Button>
 		<Button css="vr-cta ghost" disabled={replaySaving} onclick={clearReplay}>Clear</Button>
 		<p class="hint">Copy the recording's link from the AzuraCast on-demand player. Accepts a 24-char track id or a full download link.</p>
+		{#if isReplayUnavailable(replayInput.trim())}
+			<p class="replay-msg bad">
+				That link points at the retired server — it can't play. Paste the recording's link from the new server instead.
+			</p>
+		{/if}
 		{#if replayError}
 			<p class="replay-msg bad">{replayError}</p>
 		{/if}

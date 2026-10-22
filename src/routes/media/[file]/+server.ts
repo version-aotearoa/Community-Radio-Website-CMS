@@ -1,7 +1,8 @@
 import { error } from '@sveltejs/kit';
+import { AZURACAST_BASE, AZURACAST_STATION_SHORTCODE } from '$lib/azuracast';
 import type { RequestHandler } from './$types';
 
-const UPSTREAM_BASE = 'https://stream.version.nz/api/station/version_radio/art';
+const UPSTREAM_BASE = `${AZURACAST_BASE}/api/station/${AZURACAST_STATION_SHORTCODE}/art`;
 // Accepts timestamped (<24hex>-<ts>.jpg, as stored for show images) AND bare
 // (<24hex>.jpg, as emitted for replay/live art). The upstream rejects a bare id
 // with a .jpg extension (405), so we strip it before the upstream call.

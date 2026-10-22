@@ -296,10 +296,21 @@ export async function setBroadcastReplayUrl(
 	return replay_url;
 }
 
-/** Derive the canonical play URL from a pasted URL or bare track id (or null). */
+/**
+ * Canonical play URL from a pasted URL or bare track id (or null).
+ *
+ * A pasted URL is kept verbatim — origin and path exactly as given — because
+ * recordings are spread across AzuraCast instances (one host per migration
+ * era) and rewriting the host would point at a server that doesn't hold the
+ * track. A bare track id has no host of its own, so it expands against the
+ * current instance.
+ */
 export function replayPlayUrl(input: string): string | null {
-	const id = extractReplayTrackId(input);
-	return id ? azReplayPlayUrl(id) : null;
+	const raw = input.trim();
+	const id = extractReplayTrackId(raw);
+	if (!id) return null;
+	if (/^https?:\/\//i.test(raw)) return raw;
+	return azReplayPlayUrl(id);
 }
 
 /* ------------------------------------------------------------------ */

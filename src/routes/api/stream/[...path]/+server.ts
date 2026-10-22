@@ -1,12 +1,13 @@
 import { error, text } from '@sveltejs/kit';
+import { AZURACAST_BASE } from '$lib/azuracast';
 import type { RequestHandler } from './$types';
 
 /**
  * Same-origin proxy for AzuraCast HLS (and media) streams:
- * hls.js uses XHR, which is CORS-blocked against stream.version.nz from
+ * hls.js uses XHR, which is CORS-blocked against the AzuraCast origin from
  * arbitrary origins. Serving through our own Worker avoids that entirely.
  */
-const AZURACAST = 'https://stream.version.nz';
+const AZURACAST = AZURACAST_BASE;
 const ALLOWED_PREFIXES = ['/hls/', '/media/', '/api/station/'];
 
 export const GET: RequestHandler = async ({ params }) => {
