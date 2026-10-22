@@ -52,9 +52,25 @@ AzuraCast is an **external, self-hosted dependency** (not run by the app). Insta
 
 **Failure handling**: if AzuraCast is unreachable the site still loads — `/api/live` returns `isOnline: false`, `/media` art 404s, and live/replay playback is unavailable.
 
+## Video relay (Streamplace)
+
+The station is also simulcast as video to [Streamplace](https://stream.place) via
+[streamplace-azuracast-relay](https://github.com/version-aotearoa/streamplace-azuracast-relay),
+which runs on the same VPS as AzuraCast:
+
+- a remote DJ publishes from OBS over RTMPS to `multistream.versionradio.live:1935`
+- the relay passes the video through untouched (no transcode) to Streamplace
+- the same audio is pushed back into the station's Liquidsoap harbour, so radio
+  listeners hear the DJ while the video audience watches them
+- when no DJ is publishing, the relay sends the station's own audio with
+  per-track artwork and burned-in captions instead
+
+The app does not consume this yet; it remains an AzuraCast-only frontend.
+
 ## External dependencies
 
 - **AzuraCast** (self-hosted) — live stream, now-playing, replays, artwork
+- **Streamplace** — video simulcast target (see [Video relay](#video-relay-streamplace))
 - **Bandcamp** public JSON APIs — tracklist playback resolution
 - **GIPHY** — chat GIFs (client-side; `PUBLIC_GIPHY_API_KEY`)
 - **Cloudflare Turnstile** — bot protection (auth + chat)
