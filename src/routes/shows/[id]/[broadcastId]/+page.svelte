@@ -23,7 +23,10 @@
 	const broadcast = $derived(data.broadcast);
 	const tracks = $derived(data.tracks);
 	// Episode art, defaulting to the show's (DJ) image when the episode has none.
-	const artFallback = $derived(show.image ?? show.dj_image ?? null);
+	// Fallback chain for a failed artwork load: our show image, then the DJ
+	// avatar. `artOnError` appends the general show image as the last resort.
+	const artFallback = $derived([show.image, show.dj_image]);
+
 	const artUrl = $derived(episodeArtOrDefault(broadcast.id, broadcast, show));
 
 	// Replay availability is probed after paint (never during render).

@@ -539,9 +539,9 @@
 			</Button>
 			<Button css="vr-cta ghost" disabled={artSaving} onclick={clearArt}>Clear</Button>
 		</div>
-		<p class="hint">Overrides the auto replay artwork for this episode. External image URLs are
-			proxied and cached via /media; AzuraCast /media paths are used as-is. Leave blank to use the
-			replay artwork.</p>
+		<p class="hint">Overrides this episode's default artwork. External image URLs are
+			proxied and cached via /media; AzuraCast /media paths are used as-is. Leave blank to
+			use the show's own image.</p>
 		{#if artPreview}
 			<img
 				class="art-preview"
