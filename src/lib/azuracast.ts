@@ -48,17 +48,32 @@ function isMediaPath(url: string): boolean {
 	}
 }
 
+/** True when `url` lives on the AzuraCast instance we proxy art and replay from. */
+function isCurrentAzuraCastInstance(url: string): boolean {
+	try {
+		return new URL(url).origin === new URL(AZURACAST_BASE).origin;
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Explicit per-episode artwork override, or null when none is set.
- * - `b.art` set to a /media path -> used as-is (already CDN-cached).
- * - `b.art` set to any other URL -> proxied + cached via
- *   /media/ep/<broadcastId>/<urlhash>.jpg (hash busts the cache on change).
+ * Served image URL for a broadcast tile, in precedence order:
  *
- * Artwork is deliberately NOT derived from `replay_url`: a recording's track id
- * only resolves on the AzuraCast instance that issued it. After moving servers
- * the same id answers with another recording's art (HTTP 200, so nothing
- * errors) or with the station fallback. An owned value must outrank a derived
- * one — see `episodeArtOrDefault`.
+ * 1. `b.art` — the explicit episode artwork URL
+ *    - a /media path -> used as-is (already CDN-cached)
+ *    - any other URL -> proxied + cached via
+ *      /media/ep/<broadcastId>/<urlhash>.jpg (hash busts the cache on change)
+ * 2. The recording's own artwork — but only when `replay_url` points at the
+ *    AzuraCast instance we proxy art from. A track id only resolves on the
+ *    instance that issued it; after a server move the same id answers with a
+ *    different recording's art (HTTP 200, so nothing errors) or with the
+ *    station fallback. Foreign-host replays skip this step and land on the
+ *    show image instead.
+ *
+ * A recording with no custom artwork is detected downstream, not here: AzuraCast
+ * redirects an artless id to the station album-art placeholder and the /media
+ * proxy turns that into a 404, so `artOnError` walks on to the show image.
  */
 export function episodeArtUrl(
 	broadcastId: string | null | undefined,
@@ -70,7 +85,11 @@ export function episodeArtUrl(
 		if (broadcastId) return `/media/ep/${broadcastId}/${artUrlHash(art)}.jpg`;
 		return art;
 	}
-	return null;
+
+	const replay = b.replay_url?.trim();
+	if (!replay || !isCurrentAzuraCastInstance(replay)) return null;
+	const id = extractReplayTrackId(replay);
+	return id ? `/media/${id}.jpg?v=${MEDIA_ART_VERSION}` : null;
 }
 
 export interface EpisodeArtFallback {
@@ -79,10 +98,11 @@ export interface EpisodeArtFallback {
 }
 
 /**
- * Episode artwork, resolving to the show's identity by default:
- * explicit episode override, else the show's curated image, else the DJ
- * avatar, else the general show image. Never null, so renderers don't have to
- * carry their own last-resort branch.
+ * Episode artwork, preferring the most specific artwork available:
+ * explicit episode override, else the recording's own art (current instance
+ * only), else the show's curated image, else the DJ avatar, else the general
+ * show image. Never null, so renderers don't have to carry a last-resort
+ * branch of their own.
  */
 export function episodeArtOrDefault(
 	broadcastId: string | null | undefined,
