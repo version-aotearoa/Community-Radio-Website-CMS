@@ -363,7 +363,7 @@
 			<ul class="broadcasts">
 				{#each past as b, i (b.id)}
 					{@const epArt = episodeArtOrDefault(b.id, b, show)}
-					{@const epArtFb = show.image ?? show.dj_image ?? null}
+					{@const epArtFb = [show.image, show.dj_image]}
 					<li class="broadcast past" use:squareToBody>
 						<a
 							class="past-art"
