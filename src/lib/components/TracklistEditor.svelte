@@ -141,7 +141,7 @@
 		{ id: 'mark', header: 'Time', width: 90, editor: 'text' },
 		{ id: 'title', header: 'Title', width: 260, editor: 'text' },
 		{ id: 'artist', header: 'Artist', width: 220, editor: 'text' },
-		{ id: 'album', header: 'Album', width: 220, editor: 'text' },
+		{ id: 'album', header: 'Album/Label', width: 220, editor: 'text' },
 		{ id: 'url', header: 'Link', width: 240, editor: 'text' }
 	];
 

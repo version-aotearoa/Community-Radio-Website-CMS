@@ -19,7 +19,7 @@ export interface TrackCsvResult {
 const HEADER_ALIASES = {
 	title: ['title', 'track', 'track title', 'name', 'song'],
 	artist: ['artist', 'performer', 'band', 'act'],
-	album: ['album', 'record', 'lp', 'release'],
+	album: ['album', 'record', 'lp', 'release', 'label', 'label name'],
 	url: ['url', 'link', 'track url', 'bandcamp url', 'bandcamp'],
 	mark: ['time', 'timestamp', 'mark', 'marker', 'cue', 'start', 'start time']
 } as const;
