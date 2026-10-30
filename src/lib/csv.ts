@@ -1,23 +1,32 @@
+import { parseTrackTime } from '$lib/trackTime';
+
 export interface CsvTrack {
 	title: string;
 	artist: string;
 	album: string;
 	url?: string;
+	/** Cue marker in the episode recording, in seconds (blank = no marker). */
+	markSeconds?: number | null;
 }
 
 export interface TrackCsvResult {
 	tracks: CsvTrack[];
 	header: boolean;
+	/** Non-empty time cells that couldn't be read (they're imported blank). */
+	skippedMarks: number;
 }
 
 const HEADER_ALIASES = {
 	title: ['title', 'track', 'track title', 'name', 'song'],
 	artist: ['artist', 'performer', 'band', 'act'],
 	album: ['album', 'record', 'lp', 'release'],
-	url: ['url', 'link', 'track url', 'bandcamp url', 'bandcamp']
+	url: ['url', 'link', 'track url', 'bandcamp url', 'bandcamp'],
+	mark: ['time', 'timestamp', 'mark', 'marker', 'cue', 'start', 'start time']
 } as const;
 
 const URL_RE = /^https?:\/\/\S+$/i;
+/** Clock-shaped cell (`12:34`, `1:02:03`) — used to spot a time column without a header. */
+const CLOCK_RE = /^\d{1,3}(?::\d{1,2}){1,2}$/;
 
 function normalizeCell(s: string): string {
 	return s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -107,7 +116,8 @@ function detectHeader(record: string[]): boolean {
 				...HEADER_ALIASES.title,
 				...HEADER_ALIASES.artist,
 				...HEADER_ALIASES.album,
-				...HEADER_ALIASES.url
+				...HEADER_ALIASES.url,
+				...HEADER_ALIASES.mark
 			] as string[]
 		).includes(c)
 	);
@@ -132,17 +142,18 @@ function mapUrlColumn(record: string[]): number | null {
 }
 
 /**
- * Parse a CSV/TSV tracklist export into { title, artist, album, url? } rows.
- * Header row optional; when absent, columns are read positionally. A
- * URL-shaped column (e.g. Bandcamp links) is detected anywhere; link-only
- * imports (a single URL column) are valid — titles are derived at save time.
+ * Parse a CSV/TSV tracklist export into { title, artist, album, url?, markSeconds? }
+ * rows. Header row optional; when absent, columns are read positionally. A
+ * URL-shaped column (e.g. Bandcamp links) and a clock-shaped time column are
+ * detected anywhere; link-only imports (a single URL column) are valid — titles
+ * are derived at save time.
  */
 export function parseTracksCsv(
 	text: string,
 	delimiter: ',' | '\t' = text.includes('\t') && !text.includes(',') ? '\t' : ','
 ): TrackCsvResult {
 	const records = parseRecords(text, delimiter);
-	if (records.length === 0) return { tracks: [], header: false };
+	if (records.length === 0) return { tracks: [], header: false, skippedMarks: 0 };
 
 	const header = detectHeader(records[0]);
 	let start = 0;
@@ -150,36 +161,49 @@ export function parseTracksCsv(
 	let artistIdx: number | null = 1;
 	let albumIdx: number | null = 2;
 	let urlIdx: number | null = null;
+	let markIdx: number | null = null;
 	if (header) {
 		start = 1;
 		titleIdx = mapColumn(records[0], HEADER_ALIASES.title);
 		artistIdx = mapColumn(records[0], HEADER_ALIASES.artist);
 		albumIdx = mapColumn(records[0], HEADER_ALIASES.album);
 		urlIdx = mapUrlColumn(records[0]);
+		markIdx = mapColumn(records[0], HEADER_ALIASES.mark);
 	} else {
-		// No header: any URL-shaped cell becomes the link column; the remaining
-		// cells fill title, artist, album positionally. Link-only columns are
-		// supported (title stays empty, derived at save time).
+		// No header: any URL-shaped cell becomes the link column and a
+		// clock-shaped cell the time column; the rest fill title, artist, album
+		// positionally. Link-only columns are supported (title stays empty,
+		// derived at save time).
 		const isUrl = (cell: string | undefined) => URL_RE.test((cell ?? '').trim());
+		const isClock = (cell: string | undefined) => CLOCK_RE.test((cell ?? '').trim());
 		const cells = records[0] ?? [];
 		urlIdx = cells.findIndex((c) => isUrl(c));
-		const nonUrl = cells.map((_, i) => i).filter((i) => i !== urlIdx);
-		titleIdx = nonUrl[0] ?? null;
-		artistIdx = nonUrl[1] ?? null;
-		albumIdx = nonUrl[2] ?? null;
+		const clockAt = cells.findIndex((c) => isClock(c));
+		markIdx = clockAt >= 0 && clockAt !== urlIdx ? clockAt : null;
+		const rest = cells
+			.map((_, i) => i)
+			.filter((i) => i !== urlIdx && i !== markIdx);
+		titleIdx = rest[0] ?? null;
+		artistIdx = rest[1] ?? null;
+		albumIdx = rest[2] ?? null;
 	}
 
 	const tracks: CsvTrack[] = [];
+	let skippedMarks = 0;
 	for (const record of records.slice(start)) {
 		const url = (urlIdx !== null ? (record[urlIdx] ?? '') : '').trim();
 		const title = (titleIdx !== null ? (record[titleIdx] ?? '') : '').trim();
 		if (title === '' && url === '') continue;
+		const markRaw = (markIdx !== null ? (record[markIdx] ?? '') : '').trim();
+		const parsedMark = parseTrackTime(markRaw);
+		if (markRaw !== '' && !parsedMark.ok) skippedMarks += 1;
 		tracks.push({
 			title: title.slice(0, 300),
 			artist: (artistIdx !== null ? (record[artistIdx] ?? '') : '').trim().slice(0, 200),
 			album: (albumIdx !== null ? (record[albumIdx] ?? '') : '').trim().slice(0, 200),
-			...(url ? { url: url.slice(0, 500) } : {})
+			...(url ? { url: url.slice(0, 500) } : {}),
+			...(parsedMark.ok && parsedMark.seconds !== null ? { markSeconds: parsedMark.seconds } : {})
 		});
 	}
-	return { tracks, header };
+	return { tracks, header, skippedMarks };
 }

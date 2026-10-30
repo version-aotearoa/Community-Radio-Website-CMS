@@ -41,6 +41,8 @@ export interface MediaSource {
 	date?: string | null;
 	/** Originating tracklist row (used to reflect play state on the row). */
 	trackId?: string | null;
+	/** Cue marker: seconds into the recording to start at. */
+	startAt?: number | null;
 }
 
 export type PlaybackSource = { kind: 'live' } | ({ kind: 'media' } & MediaSource);
@@ -60,6 +62,29 @@ export const streamPlaying = writable(false);
 export function requestSetPlaying(play: boolean) {
 	playerSet.update((p) => ({ n: p.n + 1, play }));
 }
+
+/** One-shot seek request for the recording already loaded in the player. */
+export const playerSeek = writable<{ n: number; seconds: number }>({ n: 0, seconds: 0 });
+
+/**
+ * Ask the player to jump to `seconds` in the current recording. Used by
+ * tracklist cue markers so clicking a time seeks in place instead of reloading.
+ */
+export function requestSeek(seconds: number) {
+	const target = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+	playerSeek.update((p) => ({ n: p.n + 1, seconds: target }));
+}
+
+/**
+ * Live position of the recording in the player. Fed on `timeupdate`, so the
+ * tracklist editor can stamp a cue marker at the current playback point.
+ * `url` is null while the live stream is playing.
+ */
+export const playerPosition = writable<{ url: string | null; seconds: number; duration: number }>({
+	url: null,
+	seconds: 0,
+	duration: 0
+});
 
 /** Ask the global stream player to collapse/minimise its max sheet. */
 export function requestCollapsePlayer() {

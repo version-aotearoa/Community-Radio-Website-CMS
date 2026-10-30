@@ -7,15 +7,18 @@
 		clearPlayQueue,
 		playback,
 		playMedia,
+		requestSeek,
 		requestSetPlaying,
 		startPlayQueue,
 		streamPlaying
 	} from '$lib/stores/player';
+	import { formatTrackTime } from '$lib/trackTime';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
+	import type { TrackRow } from '$lib/server/shows';
 
 	let { data } = $props();
 
@@ -28,6 +31,34 @@
 	const artFallback = $derived([show.image, show.dj_image]);
 
 	const artUrl = $derived(episodeArtOrDefault(broadcast.id, broadcast, show));
+
+	/** Cue markers only do something when there's a recording to jump into. */
+	const replayPlayable = $derived(
+		!!broadcast.replay_url && !$unavailableReplays.has(broadcast.replay_url)
+	);
+	const hasMarks = $derived(tracks.some((t) => t.mark_seconds !== null));
+
+	/** Row whose cue marker was last clicked — pinned until playback stops. */
+	let activeMarkId = $state<string | null>(null);
+	let markWasPlaying = false;
+
+	/**
+	 * Clear the active row when the recording stops (pause/end) or playback
+	 * moves off it. The latch keeps the buffering gap between a mark click and
+	 * the first `playing` event from clearing it immediately.
+	 */
+	$effect(() => {
+		const current = $playback;
+		const url = broadcast.replay_url;
+		const onThisReplay = !!url && current.kind === 'media' && current.url === url;
+		const playingNow = $streamPlaying;
+		if (onThisReplay && playingNow) markWasPlaying = true;
+		if (activeMarkId !== null && (!onThisReplay || (markWasPlaying && !playingNow))) {
+			activeMarkId = null;
+			markWasPlaying = false;
+		}
+		if (!onThisReplay) markWasPlaying = false;
+	});
 
 	// Replay availability is probed after paint (never during render).
 	onMount(() => {
@@ -217,6 +248,21 @@
 		await Promise.all([worker(), worker()]);
 	}
 
+	/** The replay as a player source, optionally starting at a cue marker. */
+	function replaySource(startAt: number | null = null) {
+		return {
+			url: broadcast.replay_url!,
+			title: show.title,
+			artist: show.kind === 'event' ? null : (show.dj_name ?? null),
+			art: artUrl,
+			show: { id: show.id, title: show.title },
+			href: `/shows/${show.id}/${broadcast.id}`,
+			broadcastId: broadcast.id,
+			date: broadcast.date,
+			startAt
+		};
+	}
+
 	function toggleReplay() {
 		if (!broadcast.replay_url || $unavailableReplays.has(broadcast.replay_url)) return;
 		if (replayActive()) {
@@ -225,16 +271,25 @@
 		}
 		// Replay isn't the Bandcamp tracklist — stop auto-advancing that queue.
 		clearPlayQueue();
-		playMedia({
-			url: broadcast.replay_url,
-			title: show.title,
-			artist: show.kind === 'event' ? null : (show.dj_name ?? null),
-			art: artUrl,
-			show: { id: show.id, title: show.title },
-			href: `/shows/${show.id}/${broadcast.id}`,
-			broadcastId: broadcast.id,
-			date: broadcast.date
-		});
+		playMedia(replaySource());
+	}
+
+	/**
+	 * Jump into the recording from a tracklist cue marker. If this replay is
+	 * already loaded, seek in place (no reload); otherwise start it at the mark.
+	 */
+	function seekReplay(trackId: string, seconds: number) {
+		const url = broadcast.replay_url;
+		if (!url || $unavailableReplays.has(url)) return;
+		activeMarkId = trackId;
+		const current = $playback;
+		if (current.kind === 'media' && current.url === url) {
+			requestSetPlaying(true);
+			requestSeek(seconds);
+			return;
+		}
+		clearPlayQueue();
+		playMedia(replaySource(seconds));
 	}
 
 	function replayActive(): boolean {
@@ -274,6 +329,31 @@
 	image={artUrl ?? show.image}
 	url={page.url.pathname}
 />
+
+{#snippet markCell(t: TrackRow)}
+	{#if hasMarks}
+		{#if t.mark_seconds !== null}
+			{#if replayPlayable}
+				<button
+					class="mark"
+					class:pressed={activeMarkId === t.id}
+					aria-pressed={activeMarkId === t.id}
+					aria-label={`Play the recording from ${formatTrackTime(t.mark_seconds)}`}
+					title={`Play the recording from ${formatTrackTime(t.mark_seconds)}`}
+					onclick={() => seekReplay(t.id, t.mark_seconds!)}
+				>
+					{formatTrackTime(t.mark_seconds)}
+				</button>
+			{:else}
+				<span class="mark plain" title="No recording to play from this mark">
+					{formatTrackTime(t.mark_seconds)}
+				</span>
+			{/if}
+		{:else}
+			<span class="mark none" aria-hidden="true"></span>
+		{/if}
+	{/if}
+{/snippet}
 
 <div class="page">
 	<div class="page-head">
@@ -370,8 +450,13 @@
 			<ol class="tracklist">
 			{#each tracks as t, i (t.id)}
 				{#if t.url && isBandcampPageUrl(t.url)}
-					<li class="track-row">
+					<li
+						class="track-row"
+						class:active={activeMarkId === t.id}
+						aria-current={activeMarkId === t.id ? 'true' : undefined}
+					>
 						<span class="num">{i + 1}</span>
+						{@render markCell(t)}
 						{#if rowArt(t)}
 							<img class="bc-art" src={rowArt(t)} alt="" width="28" height="28" loading="lazy" />
 						{/if}
@@ -412,8 +497,13 @@
 						</a>
 					</li>
 				{:else}
-					<li>
+					<li
+						class="track-row"
+						class:active={activeMarkId === t.id}
+						aria-current={activeMarkId === t.id ? 'true' : undefined}
+					>
 						<span class="num">{i + 1}</span>
+						{@render markCell(t)}
 						{#if t.title}
 							<span class="track-title">{t.title}</span>
 						{/if}
@@ -542,6 +632,55 @@
 		width: 1.5rem;
 		flex-shrink: 0;
 		font-variant-numeric: tabular-nums;
+	}
+
+	/* Cue marker in the recording: a button when the replay can play, plain
+	   text when there's no recording (or it's gone). */
+	.mark {
+		flex-shrink: 0;
+		min-width: 3.1rem;
+		background: transparent;
+		border: none;
+		margin: 0;
+		padding: 0;
+		color: var(--vr-muted);
+		font-family: var(--vr-font-mono);
+		font-size: 0.78rem;
+		font-variant-numeric: tabular-nums;
+		text-align: left;
+		cursor: pointer;
+		text-decoration: underline;
+		text-decoration-color: transparent;
+		text-underline-offset: 0.2em;
+	}
+
+	.mark:hover {
+		color: var(--vr-text);
+		text-decoration-color: currentColor;
+	}
+
+	.mark.pressed {
+		background: var(--vr-text);
+		color: var(--vr-black);
+		padding: 0.05rem 0.25rem;
+		margin: -0.05rem -0.25rem;
+		text-decoration: none;
+	}
+
+	.mark.plain {
+		color: var(--vr-faint);
+		cursor: default;
+		text-decoration: none;
+	}
+
+	.mark.none {
+		visibility: hidden;
+	}
+
+	/* Row whose cue marker was clicked: stays lit while the recording plays. */
+	.tracklist li.active {
+		background: var(--vr-surface-high);
+		box-shadow: inset 2px 0 0 var(--vr-text);
 	}
 
 	.artist,

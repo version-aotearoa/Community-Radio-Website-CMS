@@ -7,7 +7,9 @@
 		playback,
 		advancePlayQueue,
 		playerCollapse,
+		playerPosition,
 		playerRequest,
+		playerSeek,
 		playerSet,
 		previousPlayQueue,
 		requestPlay,
@@ -33,6 +35,8 @@
 	let dragStartedAt = 0;
 	let currentTime = $state(0);
 	let duration = $state(NaN);
+	/** Cue marker waiting for the recording's metadata before it can be applied. */
+	let pendingSeek: number | null = null;
 
 	// TEMPORARY loading-trace debug ring (Safari phantom-stall investigation).
 	// Exposed as window.__vrPlayerDebug; strip once the culprit is confirmed.
@@ -165,6 +169,19 @@
 	});
 
 	$effect(() => {
+		// Cue marker seek on the recording that's already loaded (a tracklist time
+		// click while the replay plays): seek in place, no reload. If the metadata
+		// hasn't arrived yet the target is queued and applied when it does.
+		if ($playerSeek.n === 0) return;
+		const seconds = $playerSeek.seconds;
+		untrack(() => {
+			if (!mediaMode) return;
+			pendingSeek = seconds;
+			applyPendingSeek();
+		});
+	});
+
+	$effect(() => {
 		// React to a requestCollapsePlayer() signal (e.g. logo click on home).
 		if ($playerCollapse.n === 0) return;
 		expanded = false;
@@ -191,6 +208,9 @@
 		prevKey = key;
 		currentTime = 0;
 		duration = NaN;
+		// A recording may start at a cue marker (`startAt`); live never does.
+		pendingSeek = p.kind === 'media' ? (p.startAt ?? null) : null;
+		playerPosition.set({ url: p.kind === 'media' ? p.url : null, seconds: 0, duration: 0 });
 		if (!audioEl) return;
 		if (p.kind === 'media') {
 			stopLive();
@@ -416,6 +436,7 @@
 			audioEl.addEventListener('canplay', () => {
 				setLoading(false, 'event:canplay');
 				clearStallWatchdog();
+				applyPendingSeek();
 			});
 			audioEl.addEventListener('seeked', () => setLoading(false, 'event:seeked'));
 			audioEl.addEventListener('waiting', () => {
@@ -429,11 +450,26 @@
 			});
 			audioEl.addEventListener('timeupdate', () => {
 				currentTime = audioEl?.currentTime ?? 0;
+				// Mirror the position for the tracklist editor's "stamp time" helper.
+				const nowPlaying = $playback;
+				if (nowPlaying.kind === 'media') {
+					playerPosition.set({
+						url: nowPlaying.url,
+						seconds: currentTime,
+						duration: Number.isFinite(duration) ? duration : 0
+					});
+				}
 				setLoading(false, 'event:timeupdate');
 				clearStallWatchdog();
 			});
-			audioEl.addEventListener('loadedmetadata', () => (duration = audioEl?.duration ?? NaN));
-			audioEl.addEventListener('durationchange', () => (duration = audioEl?.duration ?? NaN));
+			audioEl.addEventListener('loadedmetadata', () => {
+				duration = audioEl?.duration ?? NaN;
+				applyPendingSeek();
+			});
+			audioEl.addEventListener('durationchange', () => {
+				duration = audioEl?.duration ?? NaN;
+				applyPendingSeek();
+			});
 		}
 		window.addEventListener('keydown', onKey);
 		document.addEventListener('visibilitychange', onVisibilityChange);
@@ -482,6 +518,18 @@
 		const target = Math.max(0, Math.min(sec, duration));
 		audioEl.currentTime = target;
 		currentTime = target;
+	}
+
+	/**
+	 * Apply a queued cue marker (`startAt` or a tracklist click) as soon as the
+	 * recording's duration is known. Until then the target stays pending — an
+	 * offset can't be clamped or seeked without metadata.
+	 */
+	function applyPendingSeek() {
+		if (pendingSeek === null || !audioEl) return;
+		if (!Number.isFinite(duration) || duration <= 0) return;
+		seekTo(pendingSeek);
+		pendingSeek = null;
 	}
 
 	function trackText() {

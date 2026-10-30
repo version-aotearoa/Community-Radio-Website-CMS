@@ -38,6 +38,7 @@ export interface BroadcastRow {
 }
 
 import { extractReplayTrackId, replayPlayUrl as azReplayPlayUrl } from '$lib/azuracast';
+import { isValidMark } from '$lib/trackTime';
 import {
 	DESCRIPTION_MAX,
 	descriptionToText,
@@ -70,6 +71,8 @@ export interface TrackRow {
 	stream_art_id: string | null;
 	stream_capped: number | null;
 	duration_seconds: number | null;
+	/** Cue marker: seconds from the start of this broadcast's recording. */
+	mark_seconds: number | null;
 	/** Bandcamp numeric ids (cached from the search API) so re-resolve skips search. */
 	bandcamp_band_id: number | null;
 	bandcamp_tralbum_id: number | null;
@@ -84,6 +87,8 @@ export interface TrackInput {
 	url?: string | null;
 	embedId?: string | null;
 	albumId?: string | null;
+	/** Cue marker: seconds from the start of the broadcast's recording. */
+	markSeconds?: number | null;
 }
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -845,8 +850,8 @@ export async function replaceTracklist(
 		...tracks.map((track, i) =>
 			db
 				.prepare(
-					`INSERT INTO track (id, show_id, broadcast_id, position, title, artist, album, url, embed_id, album_id, duration_seconds, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+					`INSERT INTO track (id, show_id, broadcast_id, position, title, artist, album, url, embed_id, album_id, duration_seconds, mark_seconds, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
 				)
 				.bind(
 					crypto.randomUUID(),
@@ -859,6 +864,7 @@ export async function replaceTracklist(
 					track.url?.trim().slice(0, 500) ?? null,
 					track.embedId ?? null,
 					track.albumId ?? null,
+					isValidMark(track.markSeconds) ? track.markSeconds : null,
 					t,
 					t
 				)

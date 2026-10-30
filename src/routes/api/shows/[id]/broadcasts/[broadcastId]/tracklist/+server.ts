@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { getShow, getTracklist, replaceTracklist, resolveBroadcastForShow } from '$lib/server/shows';
+import { isValidMark, MARK_MAX_SECONDS } from '$lib/trackTime';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
@@ -30,17 +31,33 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 	if (!broadcast) return json({ error: 'Not found' }, { status: 404 });
 
 	const body = (await request.json()) as {
-		tracks?: Array<{ title?: string; artist?: string; album?: string; url?: string }>;
+		tracks?: Array<{
+			title?: string;
+			artist?: string;
+			album?: string;
+			url?: string;
+			markSeconds?: unknown;
+		}>;
 	};
 	if (!Array.isArray(body.tracks)) {
 		return json({ error: 'tracks must be an array' }, { status: 400 });
+	}
+	for (const [i, t] of body.tracks.entries()) {
+		const mark = t.markSeconds;
+		if (mark !== null && mark !== undefined && !isValidMark(mark)) {
+			return json(
+				{ error: `Row ${i + 1}: time must be whole seconds between 0 and ${MARK_MAX_SECONDS}` },
+				{ status: 400 }
+			);
+		}
 	}
 	const filtered = body.tracks
 		.map((t) => ({
 			title: String(t.title ?? ''),
 			artist: String(t.artist ?? ''),
 			album: String(t.album ?? ''),
-			url: String(t.url ?? '').trim() || null
+			url: String(t.url ?? '').trim() || null,
+			markSeconds: isValidMark(t.markSeconds) ? t.markSeconds : null
 		}))
 		.filter((t) => t.title.trim() !== '' || t.url !== null);
 
