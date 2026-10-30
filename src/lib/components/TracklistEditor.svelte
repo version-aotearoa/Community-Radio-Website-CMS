@@ -2,8 +2,11 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { Grid, WillowDark } from '@svar-ui/svelte-grid';
 	import { Button } from '@svar-ui/svelte-core';
+	import { get } from 'svelte/store';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import { parseTracksCsv } from '$lib/csv';
+	import { formatTrackTime, parseTrackTime } from '$lib/trackTime';
+	import { playback, playerPosition } from '$lib/stores/player';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import type { ShowRow, BroadcastRow, TrackRow } from '$lib/server/shows';
@@ -91,6 +94,7 @@
 		editable.map((t) => ({
 			id: t.id,
 			position: t.position,
+			mark: formatTrackTime(t.mark_seconds),
 			title: t.title,
 			artist: t.artist,
 			album: t.album,
@@ -98,24 +102,47 @@
 		}))
 	);
 
+	/** Rows whose typed time couldn't be read (id → raw text); blocks saving. */
+	let invalidMarks = $state<Record<string, string>>({});
+
+	/** First row whose time is earlier than the row above it (warning only). */
+	const backwardsAt = $derived.by(() => {
+		let prev: number | null = null;
+		for (const t of editable) {
+			if (t.mark_seconds === null) continue;
+			if (prev !== null && t.mark_seconds < prev) return t.position;
+			prev = t.mark_seconds;
+		}
+		return null;
+	});
+
 	function resyncFromGrid() {
 		const rows = gridApi?.getState().data ?? [];
-		editable = rows.map((r: any) => ({
-			id: r.id,
-			position: Number(r.position ?? 0),
-			title: String(r.title ?? ''),
-			artist: String(r.artist ?? ''),
-			album: String(r.album ?? ''),
-			url: String(r.url ?? '')
-		}));
+		const invalid: Record<string, string> = {};
+		editable = rows.map((r: any) => {
+			const rawMark = String(r.mark ?? '');
+			const parsed = parseTrackTime(rawMark);
+			if (!parsed.ok) invalid[String(r.id)] = rawMark.trim();
+			return {
+				id: r.id,
+				position: Number(r.position ?? 0),
+				mark_seconds: parsed.ok ? parsed.seconds : null,
+				title: String(r.title ?? ''),
+				artist: String(r.artist ?? ''),
+				album: String(r.album ?? ''),
+				url: String(r.url ?? '')
+			};
+		});
+		invalidMarks = invalid;
 	}
 
 	const columns = [
 		{ id: 'position', header: '#', width: 54 },
-		{ id: 'title', header: 'Title', width: 280, editor: 'text' },
-		{ id: 'artist', header: 'Artist', width: 240, editor: 'text' },
-		{ id: 'album', header: 'Album', width: 240, editor: 'text' },
-		{ id: 'url', header: 'Link', width: 260, editor: 'text' }
+		{ id: 'mark', header: 'Time', width: 90, editor: 'text' },
+		{ id: 'title', header: 'Title', width: 260, editor: 'text' },
+		{ id: 'artist', header: 'Artist', width: 220, editor: 'text' },
+		{ id: 'album', header: 'Album', width: 220, editor: 'text' },
+		{ id: 'url', header: 'Link', width: 240, editor: 'text' }
 	];
 
 	function handleInit(api: any) {
@@ -162,6 +189,7 @@
 			row: {
 				id: crypto.randomUUID(),
 				position: rows.length + 1,
+				mark: '',
 				title: '',
 				artist: '',
 				album: '',
@@ -197,7 +225,7 @@
 		if (!file) return;
 		try {
 			const text = await file.text();
-			const { tracks: parsed, header } = parseTracksCsv(text);
+			const { tracks: parsed, header, skippedMarks } = parseTracksCsv(text);
 			// Import always replaces the current grid contents — clearing is a
 			// no-op when the grid is empty, so this also serves a fresh import.
 			const rows = gridApi?.getState().data ?? [];
@@ -210,6 +238,7 @@
 					row: {
 						id: crypto.randomUUID(),
 						position: ++position,
+						mark: formatTrackTime(t.markSeconds ?? null),
 						title: t.title,
 						artist: t.artist,
 						album: t.album,
@@ -220,10 +249,17 @@
 			}
 			renumber();
 			const withLinks = parsed.filter((t) => t.url).length;
+			const withTimes = parsed.filter((t) => t.markSeconds !== undefined).length;
 			const linkNote = withLinks ? ` — ${withLinks} with link${withLinks === 1 ? '' : 's'}` : '';
+			const timeNote = withTimes ? ` — ${withTimes} with time${withTimes === 1 ? '' : 's'}` : '';
+			const skippedNote = skippedMarks
+				? ` ${skippedMarks} time${skippedMarks === 1 ? '' : 's'} couldn't be read and ${
+						skippedMarks === 1 ? 'was' : 'were'
+					} left blank.`
+				: '';
 			notice = header
-				? `Imported ${parsed.length} tracks from CSV${linkNote}.`
-				: `Imported ${parsed.length} tracks (no header row; columns read as title, artist, album${withLinks ? `, link` : ''})${linkNote}.`;
+				? `Imported ${parsed.length} tracks from CSV${linkNote}${timeNote}.${skippedNote}`
+				: `Imported ${parsed.length} tracks (no header row; columns read as title, artist, album${withLinks ? `, link` : ''})${linkNote}${timeNote}.${skippedNote}`;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not read that file.';
 		} finally {
@@ -357,12 +393,31 @@
 	async function save() {
 		error = '';
 		notice = '';
-		saving = true;
 		// Commit any still-open cell editor so its pending value reaches row data.
-		if (gridApi) gridApi.exec('close-editor', {}).catch(() => {});
+		if (gridApi) await gridApi.exec('close-editor', {}).catch(() => {});
 		resyncFromGrid();
+
+		const badRows = Object.entries(invalidMarks);
+		if (badRows.length > 0) {
+			const positions = badRows.map(
+				([id]) => editable.find((t) => t.id === id)?.position ?? '?'
+			);
+			const which = positions.length === 1 ? 'row' : 'rows';
+			error = `Can't save: ${which} ${positions.join(', ')} ${
+				positions.length === 1 ? "has a time that isn't" : "have times that aren't"
+			} a clock value. Use m:ss or h:mm:ss — or leave it blank.`;
+			return;
+		}
+
+		saving = true;
 		const payload = editable
-			.map((t) => ({ title: t.title, artist: t.artist, album: t.album, url: t.url ?? '' }))
+			.map((t) => ({
+				title: t.title,
+				artist: t.artist,
+				album: t.album,
+				url: t.url ?? '',
+				markSeconds: t.mark_seconds
+			}))
 			.filter((t) => t.title.trim() !== '' || t.url.trim() !== '');
 
 		const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/tracklist`, {
@@ -432,6 +487,38 @@
 			});
 			saveVersion += 1;
 		}
+	}
+
+	let stampNotice = $state('');
+
+	/**
+	 * Fill the selected row's time with the player's current position in this
+	 * episode's replay — the quick way to mark while listening back.
+	 */
+	async function stampSelected() {
+		stampNotice = '';
+		const selected = gridApi?.getState().selectedRows ?? [];
+		const id = selected[0];
+		if (!id) {
+			stampNotice = 'Select a row first, then stamp the playing position.';
+			return;
+		}
+		const replayUrl = broadcast.replay_url;
+		const current = get(playback);
+		const pos = get(playerPosition);
+		if (
+			!replayUrl ||
+			current.kind !== 'media' ||
+			current.url !== replayUrl ||
+			pos.url !== replayUrl
+		) {
+			stampNotice = "Play this episode's replay, then stamp the position.";
+			return;
+		}
+		const seconds = Math.max(0, Math.floor(pos.seconds));
+		await gridApi?.exec('update-row', { id, row: { mark: formatTrackTime(seconds) } });
+		resyncFromGrid();
+		stampNotice = `Stamped ${formatTrackTime(seconds)} into the selected row.`;
 	}
 </script>
 
@@ -562,6 +649,7 @@
 		<Button css="vr-cta ghost" onclick={() => fileInput?.click()}>Import CSV</Button>
 		<Button css="vr-cta ghost" onclick={addTrack}>+ Add track</Button>
 		<Button css="vr-cta ghost" onclick={deleteSelected}>Delete selected</Button>
+		<Button css="vr-cta ghost" onclick={stampSelected}>Stamp time</Button>
 		<Button css="vr-cta" type="primary" disabled={saving} onclick={save}>
 			{saving ? 'Saving…' : 'Save tracklist'}
 		</Button>
@@ -572,6 +660,12 @@
 	{/if}
 	{#if notice}
 		<div class="notice ok">{notice}</div>
+	{/if}
+	{#if backwardsAt !== null}
+		<div class="notice warn">Times go backwards at row {backwardsAt} — allowed, just checking.</div>
+	{/if}
+	{#if stampNotice}
+		<p class="hint">{stampNotice}</p>
 	{/if}
 
 	<div class="grid-wrap" onkeydowncapture={onGridKeydown}>
@@ -590,7 +684,9 @@
 		{/key}
 	</div>
 
-	<p class="hint">Click a cell to edit it. Drag rows to reorder. Use Ctrl+Z / Ctrl+Y to undo and redo.</p>
+	<p class="hint">Click a cell to edit it. Time is where the track starts in this episode's
+		recording (m:ss or h:mm:ss) — listeners click it to jump there. Select a row and use
+		“Stamp time” while the replay plays to fill it in. Drag rows to reorder. Use Ctrl+Z / Ctrl+Y to undo and redo.</p>
 {/if}
 </div>
 
@@ -814,5 +910,10 @@
 
 	.notice.bad {
 		color: var(--vr-text);
+	}
+
+	.notice.warn {
+		border-style: dashed;
+		color: var(--vr-muted);
 	}
 </style>

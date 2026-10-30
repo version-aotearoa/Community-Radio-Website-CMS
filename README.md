@@ -107,6 +107,26 @@ Clicking a track still resolves as a fallback (usually instant once prefetched).
 - Lock-screen / headset **next/previous** control the queue (Media Session `nexttrack`/`previoustrack`).
 - Starting a replay (or going back to live) clears the queue.
 
+**Cue markers (click a time to jump in the recording).** A tracklist row can carry
+`mark_seconds` — its position in that episode's recording (`broadcast.replay_url`,
+an AzuraCast on-demand file with HTTP Range support). The public episode page shows
+it as a time in the row; clicking it plays the replay from that point:
+
+- Already playing this replay → the player **seeks in place** (`requestSeek` in the
+  player store), so nothing reloads.
+- Otherwise the replay starts with `startAt`, applied once metadata makes seeking
+  possible (`applyPendingSeek` in `StreamPlayer`).
+- The clicked row highlights (`aria-current`) until the recording pauses, ends, or
+  playback moves elsewhere.
+- No replay (or one flagged by `replayAvailability`) → the time renders as plain,
+  non-clickable text. Marks are stored regardless, so they become live as soon as a
+  recording is added.
+
+DJs type `m:ss` / `h:mm:ss` (bare seconds also work) into the **Time** column; CSV
+imports recognise `time`/`timestamp`/`mark`/`cue`/`start` headers (or a clock-shaped
+column), and **Stamp time** fills the selected row from the replay's current
+position. Column: `0028_track_mark.sql`.
+
 **Notes / limits**
 
 - Signed stream URLs expire; a play after expiry re-resolves (ids are cached, so it's one API call).

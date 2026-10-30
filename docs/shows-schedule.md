@@ -60,7 +60,8 @@ Indexes: `(show_id, date)`, `(date)`.
 ### `track` — tracklist rows (belong to a **broadcast**, not a show)
 
 `id`, `show_id`, `broadcast_id`, `position`, `title`, `artist`, `album`, `url`
-(Bandcamp page), `embed_id`, `album_id`, `duration_seconds`, and the Bandcamp
+(Bandcamp page), `embed_id`, `album_id`, `duration_seconds`, `mark_seconds`
+(cue marker: seconds into the episode recording; `0028`), and the Bandcamp
 stream cache (`stream_url`, `stream_expires_at`, `stream_format`,
 `stream_art_id`, `stream_capped`, `bandcamp_band_id`, `bandcamp_tralbum_id`).
 
