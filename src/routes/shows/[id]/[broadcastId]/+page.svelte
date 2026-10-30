@@ -489,6 +489,9 @@
 						{#if trackMeta[t.id]?.artist || t.artist}
 							<span class="artist">{trackMeta[t.id]?.artist || t.artist}</span>
 						{/if}
+						{#if t.album}
+							<span class="album">{t.album}</span>
+						{/if}
 						{#if trackError[t.id]}
 							<span class="track-err" title={trackError[t.id]}>{trackError[t.id]}</span>
 						{/if}
