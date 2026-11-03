@@ -142,6 +142,11 @@ imports recognise `time`/`timestamp`/`mark`/`cue`/`start` headers (or a clock-sh
 column), and **Stamp time** fills the selected row from the replay's current
 position. Column: `0028_track_mark.sql`.
 
+The tracklist editor has a **replay strip** above the grid — play/pause, skip
+±1 min, scrub and a live `12:34 / 1:04:09` readout — so cues can be stamped
+without leaving edit mode. It drives the same global player as the public page,
+and falls back to “Set a replay link” when the episode has no recording.
+
 **Saving a moment / sharing it.** Each public tracklist row carries a heart and a
 copy-link beside its number:
 

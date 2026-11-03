@@ -4,9 +4,19 @@
 	import { Button } from '@svar-ui/svelte-core';
 	import { get } from 'svelte/store';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
+	import SeekControl from '$lib/components/SeekControl.svelte';
 	import { parseTracksCsv } from '$lib/csv';
 	import { formatTrackTime, parseTrackTime } from '$lib/trackTime';
-	import { playback, playerPosition } from '$lib/stores/player';
+	import {
+		clearPlayQueue,
+		playback,
+		playMedia,
+		playerPosition,
+		requestSeek,
+		requestSetPlaying,
+		streamPlaying
+	} from '$lib/stores/player';
+	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import type { ShowRow, BroadcastRow, TrackRow } from '$lib/server/shows';
@@ -78,6 +88,54 @@
 
 	const artFb = $derived(show.image ?? null);
 	const artPreview = $derived(episodeArtOrDefault(broadcast.id, broadcast, { image: show.image }));
+
+	/* ---- Replay preview: play/pause, ±1 min and scrub without leaving the editor ---- */
+
+	/** The saved recording link; updated locally when the Replay tab saves one. */
+	let replayUrl = $state('');
+	$effect(() => {
+		replayUrl = broadcast.replay_url ?? '';
+	});
+	$effect(() => {
+		probeReplayAvailability([broadcast.replay_url]);
+	});
+
+	const replayMine = $derived($playback.kind === 'media' && $playback.url === replayUrl);
+	const replayPlaying = $derived(replayMine && $streamPlaying);
+	const replayPos = $derived(
+		replayMine && $playerPosition.url === replayUrl ? $playerPosition : null
+	);
+	const replayUnavailable = $derived(!!replayUrl && $unavailableReplays.has(replayUrl));
+
+	function toggleReplayPreview() {
+		if (!replayUrl || replayUnavailable) return;
+		if (replayMine) {
+			requestSetPlaying(!replayPlaying);
+			return;
+		}
+		// Same path as the public episode page: one shared <audio> element.
+		clearPlayQueue();
+		playMedia({
+			url: replayUrl,
+			title: show.title,
+			artist: show.dj_handle || null,
+			art: artPreview,
+			show: { id: show.id, title: show.title },
+			href: `/shows/${show.id}/${broadcast.id}`,
+			broadcastId: broadcast.id,
+			date: broadcast.date
+		});
+	}
+
+	/** Skip ±`delta` seconds; clamping happens in the player store. */
+	function nudgeReplay(delta: number) {
+		if (!replayMine) return;
+		requestSeek(Math.max(0, (replayPos?.seconds ?? 0) + delta));
+	}
+
+	function seekReplayPreview(seconds: number) {
+		if (replayMine) requestSeek(seconds);
+	}
 
 	const GRID_EVENTS = [
 		'update-cell',
@@ -284,6 +342,7 @@
 		}
 		const saved = (await res.json()) as { replayUrl: string | null };
 		replayInput = saved.replayUrl ?? '';
+		replayUrl = saved.replayUrl ?? '';
 		replayNotice = saved.replayUrl ? 'Replay link saved.' : 'Replay link cleared.';
 	}
 
@@ -300,6 +359,7 @@
 			return;
 		}
 		replayInput = '';
+		replayUrl = '';
 		replayNotice = 'Replay link cleared.';
 	}
 
@@ -503,16 +563,10 @@
 			stampNotice = 'Select a row first, then stamp the playing position.';
 			return;
 		}
-		const replayUrl = broadcast.replay_url;
 		const current = get(playback);
 		const pos = get(playerPosition);
-		if (
-			!replayUrl ||
-			current.kind !== 'media' ||
-			current.url !== replayUrl ||
-			pos.url !== replayUrl
-		) {
-			stampNotice = "Play this episode's replay, then stamp the position.";
+		if (!replayUrl || current.kind !== 'media' || current.url !== replayUrl || pos.url !== replayUrl) {
+			stampNotice = "Play this episode's replay above, then stamp the position.";
 			return;
 		}
 		const seconds = Math.max(0, Math.floor(pos.seconds));
@@ -645,6 +699,57 @@
 {/if}
 
 {#if activeTab === 'tracklist'}
+	<div class="replay-strip">
+		{#if !replayUrl}
+			<button class="strip-btn" onclick={() => (activeTab = 'replay')}>
+				Set a replay link
+			</button>
+			<span class="strip-note">A recording is needed to stamp times.</span>
+		{:else if replayUnavailable}
+			<span class="strip-note">Recording no longer available.</span>
+		{:else}
+			<button
+				class="strip-btn"
+				disabled={!replayMine}
+				onclick={() => nudgeReplay(-60)}
+				aria-label="Back 1 minute"
+				title="Back 1 minute"
+			>
+				−1m
+			</button>
+			<button
+				class="strip-btn play"
+				class:playing={replayPlaying}
+				onclick={toggleReplayPreview}
+				aria-label={replayPlaying ? 'Pause the replay' : 'Play the replay'}
+			>
+				{replayPlaying ? '❚❚ Pause' : '▶ Replay'}
+			</button>
+			<button
+				class="strip-btn"
+				disabled={!replayMine}
+				onclick={() => nudgeReplay(60)}
+				aria-label="Forward 1 minute"
+				title="Forward 1 minute"
+			>
+				+1m
+			</button>
+			<span class="strip-time mono">
+				{formatTrackTime(replayPos?.seconds ?? 0)} / {formatTrackTime(replayPos?.duration ?? 0)}
+			</span>
+			{#if replayMine && replayPos && replayPos.duration > 0}
+				<div class="strip-seek">
+					<SeekControl
+						currentTime={replayPos.seconds}
+						duration={replayPos.duration}
+						onSeek={seekReplayPreview}
+						compact
+					/>
+				</div>
+			{/if}
+		{/if}
+	</div>
+
 	<div class="tracklist-actions">
 		<Button css="vr-cta ghost" onclick={() => fileInput?.click()}>Import CSV</Button>
 		<Button css="vr-cta ghost" onclick={addTrack}>+ Add track</Button>
@@ -685,8 +790,9 @@
 	</div>
 
 	<p class="hint">Click a cell to edit it. Time is where the track starts in this episode's
-		recording (m:ss or h:mm:ss) — listeners click it to jump there. Select a row and use
-		“Stamp time” while the replay plays to fill it in. Drag rows to reorder. Use Ctrl+Z / Ctrl+Y to undo and redo.</p>
+		recording (m:ss or h:mm:ss) — listeners click it to jump there. Use the replay strip
+		above to play, skip ±1 min or scrub, select a row, then “Stamp time”. Drag rows to
+		reorder. Use Ctrl+Z / Ctrl+Y to undo and redo.</p>
 {/if}
 </div>
 
@@ -770,6 +876,70 @@
 		gap: 0.5rem;
 		flex-wrap: wrap;
 		margin: 0 0 0.5rem;
+	}
+
+	/* Replay preview: play/pause, ±1 min, scrub — so cues can be stamped
+	   without leaving edit mode. */
+	.replay-strip {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin: 0 0 0.6rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid var(--vr-line);
+		background: var(--vr-surface-low);
+	}
+
+	.strip-btn {
+		background: transparent;
+		border: 1px solid var(--vr-line-muted);
+		color: var(--vr-text);
+		font-family: var(--vr-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		padding: 0.35rem 0.6rem;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.strip-btn:hover:not(:disabled) {
+		background: var(--vr-text);
+		color: var(--vr-black);
+		border-color: var(--vr-line);
+	}
+
+	.strip-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.strip-btn.play {
+		min-width: 6.5rem;
+		border-color: var(--vr-line);
+	}
+
+	.strip-btn.play.playing {
+		background: var(--vr-text);
+		color: var(--vr-black);
+	}
+
+	.strip-time {
+		font-size: 0.72rem;
+		color: var(--vr-muted);
+		white-space: nowrap;
+	}
+
+	.strip-seek {
+		flex: 1;
+		min-width: 140px;
+		display: flex;
+	}
+
+	.strip-note {
+		font-size: 0.78rem;
+		color: var(--vr-muted);
 	}
 
 	.grid-wrap {
