@@ -578,6 +578,12 @@
 	</p>
 
 <section class="card">
+	{#if broadcast.cancelled}
+		<p class="cancelled-note">
+			This episode was cancelled. <a href={`/shows/${show.id}`}>Back to {show.title}</a> to see
+			what's on instead.
+		</p>
+	{:else}
 	<div class="replay">
 		{#if artUrl}
 			<button
@@ -738,6 +744,7 @@
 		</div>
 	{:else}
 		<p class="hint">No tracklist for this broadcast.</p>
+	{/if}
 	{/if}
 </section>
 
@@ -1021,6 +1028,20 @@
 
 	.hint {
 		color: var(--vr-muted);
+	}
+
+	.cancelled-note {
+		margin: 0;
+		padding: 0.85rem 1rem;
+		border: 1px dashed var(--vr-line);
+		background: var(--vr-surface-low);
+		color: var(--vr-muted);
+		font-size: 0.9rem;
+	}
+
+	.cancelled-note a {
+		color: var(--vr-text);
+		text-decoration: underline;
 	}
 
 	.replay {

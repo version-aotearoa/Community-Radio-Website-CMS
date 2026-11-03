@@ -16,6 +16,12 @@ export interface ShowRow {
 	anchor_date: string | null;
 	cycleWeek?: number;
 	active: number;
+	/** A break: episodes inside the window are cancelled, archive untouched. */
+	paused: number;
+	/** YYYY-MM-DD end of the break; null = until resumed. */
+	paused_until: string | null;
+	/** YYYY-MM-DD the current break started. */
+	paused_at: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -33,6 +39,8 @@ export interface BroadcastRow {
 	home_ready: number;
 	/** Admin-set artwork override (any public image URL); else replay art is used. */
 	art: string | null;
+	/** Hidden from public lists without being deleted (see migrations/0030). */
+	cancelled: number;
 	created_at: number;
 	updated_at: number;
 }
@@ -169,7 +177,18 @@ export function nextDateForWeekday(dayOfWeek: number, fromDate: string): string 
  */
 export async function ensureBroadcasts(
 	db: D1Database,
-	show: Pick<ShowRow, 'id' | 'interval_weeks' | 'anchor_date' | 'day_of_week' | 'start_minutes' | 'duration_minutes' | 'kind'>,
+	show: Pick<
+		ShowRow,
+		| 'id'
+		| 'interval_weeks'
+		| 'anchor_date'
+		| 'day_of_week'
+		| 'start_minutes'
+		| 'duration_minutes'
+		| 'kind'
+		| 'paused'
+		| 'paused_until'
+	>,
 	weeks = 12,
 	fromDate?: string
 ): Promise<BroadcastRow[]> {
@@ -190,25 +209,31 @@ export async function ensureBroadcasts(
 	let k = 0;
 	let date = scheduleStart;
 	while (date <= horizon) {
-		stmts.push(
-			db
-				.prepare(
-					`INSERT OR IGNORE INTO broadcast (id, show_id, date, start_minutes, duration_minutes, interval_weeks, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-				)
-				.bind(
-					// Friendly, deterministic episode slug (`<show>-<date>`) — matches
-					// the admin Add-episode route and events, and keeps URLs readable.
-					`${show.id}-${date}`,
-					show.id,
-					date,
-					show.start_minutes,
-					show.duration_minutes,
-					show.interval_weeks,
-					now(),
-					now()
-				)
-		);
+		// A show on a break materialises nothing inside the break window; the
+		// cycle phase is preserved because dates still advance by intervalDays.
+		const inBreak =
+			show.paused === 1 && (show.paused_until === null || date <= show.paused_until);
+		if (!inBreak) {
+			stmts.push(
+				db
+					.prepare(
+						`INSERT OR IGNORE INTO broadcast (id, show_id, date, start_minutes, duration_minutes, interval_weeks, created_at, updated_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+					)
+					.bind(
+						// Friendly, deterministic episode slug (`<show>-<date>`) — matches
+						// the admin Add-episode route and events, and keeps URLs readable.
+						`${show.id}-${date}`,
+						show.id,
+						date,
+						show.start_minutes,
+						show.duration_minutes,
+						show.interval_weeks,
+						now(),
+						now()
+					)
+			);
+		}
 		k += 1;
 		date = addDays(scheduleStart, k * intervalDays);
 	}
@@ -227,7 +252,7 @@ export async function getBroadcasts(db: D1Database, showId: string): Promise<Bro
 /** The show's current broadcast: next upcoming, or latest past if nothing upcoming. */
 export async function getActiveBroadcast(db: D1Database, showId: string): Promise<BroadcastRow | null> {
 	const upcoming = await db
-		.prepare('SELECT * FROM broadcast WHERE show_id = ? AND date >= ? ORDER BY date LIMIT 1')
+		.prepare('SELECT * FROM broadcast WHERE show_id = ? AND date >= ? AND cancelled = 0 ORDER BY date LIMIT 1')
 		.bind(showId, todayStr())
 		.first();
 	if (upcoming) return sanitizeBroadcastRow(upcoming as unknown as BroadcastRow);
@@ -243,6 +268,115 @@ export async function getBroadcast(db: D1Database, id: string): Promise<Broadcas
 		| BroadcastRow
 		| null;
 	return row ? sanitizeBroadcastRow(row) : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Episode cancellation, deletion and show breaks                      */
+/* ------------------------------------------------------------------ */
+
+/** Cancel (hide) or restore a single episode. Returns the new state. */
+export async function setBroadcastCancelled(
+	db: D1Database,
+	broadcastId: string,
+	cancelled: boolean
+): Promise<boolean> {
+	await db
+		.prepare(
+			`UPDATE broadcast SET cancelled = ?, updated_at = ?,
+			   featured = CASE WHEN ? = 1 THEN 0 ELSE featured END,
+			   home_ready = CASE WHEN ? = 1 THEN 0 ELSE home_ready END
+			 WHERE id = ?`
+		)
+		.bind(cancelled ? 1 : 0, now(), cancelled ? 1 : 0, cancelled ? 1 : 0, broadcastId)
+		.run();
+	return cancelled;
+}
+
+/** Hard delete: tracks first (no FK), then the episode (bookmarks/cues cascade). */
+export async function deleteBroadcastForever(db: D1Database, broadcastId: string): Promise<void> {
+	await db.batch([
+		db.prepare('DELETE FROM track WHERE broadcast_id = ?').bind(broadcastId),
+		db.prepare('DELETE FROM broadcast WHERE id = ?').bind(broadcastId)
+	]);
+}
+
+/** All shows owned by a DJ (active or not) — for bulk break changes. */
+export async function getShowsByDjId(db: D1Database, djId: string): Promise<ShowRow[]> {
+	const { results } = await db
+		.prepare('SELECT * FROM show WHERE dj_id = ? ORDER BY day_of_week, start_minutes')
+		.bind(djId)
+		.all();
+	return results as unknown as ShowRow[];
+}
+
+/**
+ * Put a show on a break: hide its episodes from today (through `until`, or
+ * indefinitely when null) while leaving the archive intact.
+ */
+export async function pauseShow(
+	db: D1Database,
+	showId: string,
+	until: string | null
+): Promise<void> {
+	const t = now();
+	const today = todayStr();
+	await db.batch([
+		db
+			.prepare(
+				'UPDATE show SET paused = 1, paused_until = ?, paused_at = ?, updated_at = ? WHERE id = ?'
+			)
+			.bind(until, today, t, showId),
+		db
+			.prepare(
+				`UPDATE broadcast SET cancelled = 1, featured = 0, home_ready = 0, updated_at = ?
+				 WHERE show_id = ? AND date >= ? AND (? IS NULL OR date <= ?)`
+			)
+			.bind(t, showId, today, until, until)
+	]);
+}
+
+/** End a break: future episodes return and the horizon is re-materialised. */
+export async function resumeShow(db: D1Database, showId: string): Promise<void> {
+	const t = now();
+	const today = todayStr();
+	await db.batch([
+		db
+			.prepare(
+				'UPDATE show SET paused = 0, paused_until = NULL, paused_at = NULL, updated_at = ? WHERE id = ?'
+			)
+			.bind(t, showId),
+		db
+			.prepare('UPDATE broadcast SET cancelled = 0, updated_at = ? WHERE show_id = ? AND date >= ?')
+			.bind(t, showId, today)
+	]);
+	const show = await getShow(db, showId);
+	if (show) await ensureBroadcasts(db, show, 12, today);
+}
+
+/** Bulk break: every recurring show owned by a DJ. */
+export async function pauseDjShows(
+	db: D1Database,
+	djId: string,
+	until: string | null
+): Promise<number> {
+	let changed = 0;
+	for (const show of await getShowsByDjId(db, djId)) {
+		if (show.kind === 'event') continue;
+		await pauseShow(db, show.id, until);
+		changed += 1;
+	}
+	return changed;
+}
+
+/** Bulk resume: every recurring show owned by a DJ. */
+export async function resumeDjShows(db: D1Database, djId: string): Promise<number> {
+	let changed = 0;
+	for (const show of await getShowsByDjId(db, djId)) {
+		if (show.kind === 'event') continue;
+		await resumeShow(db, show.id);
+		changed += 1;
+	}
+	return changed;
 }
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -500,7 +634,7 @@ export async function getOnAirBroadcast(
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
 			 WHERE b.date = ? AND b.start_minutes <= ? AND ? < b.start_minutes + b.duration_minutes
-			   AND s.active = 1
+			   AND s.active = 1 AND b.cancelled = 0
 			 LIMIT 1`
 		)
 		.bind(date, minutes, minutes)
@@ -519,7 +653,7 @@ export async function getNextBroadcast(
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
-			 WHERE s.active = 1
+			 WHERE s.active = 1 AND b.cancelled = 0
 			   AND (b.date > ? OR (b.date = ? AND b.start_minutes > ?))
 			 ORDER BY b.date, b.start_minutes
 			 LIMIT 1`
@@ -560,7 +694,7 @@ export async function getUpcomingBroadcasts(
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
-			 WHERE b.date >= ? AND b.date <= ? AND s.active = 1
+			 WHERE b.date >= ? AND b.date <= ? AND s.active = 1 AND b.cancelled = 0
 			 ORDER BY b.date, b.start_minutes`
 		)
 		.bind(from, to)
@@ -601,6 +735,7 @@ export async function findOverlappingShows(
 				 JOIN show s ON s.id = b.show_id
 				 WHERE b.date = ?
 				   AND b.start_minutes + b.duration_minutes > ? AND b.start_minutes < ?
+				   AND b.cancelled = 0
 				   AND (? IS NULL OR s.id != ?)
 				 LIMIT 5`
 			)

@@ -197,6 +197,7 @@
 									{fmtDate(show.anchor_date)}
 								{:else}
 									{airLabel(show)}{#if show.showCycleWeeks.length > 0}<span class="asterisk" aria-hidden="true">*</span>{/if}
+									{#if show.paused}<span class="break-tag">On break</span>{/if}
 								{/if}
 							</p>
 							<h2 class="h-md">{show.title}</h2>
@@ -407,6 +408,22 @@
 	.card:hover .event-tag {
 		border-color: rgba(0, 0, 0, 0.6);
 		color: #000;
+	}
+
+	.break-tag {
+		display: inline-block;
+		margin-left: 0.5rem;
+		padding: 0.1rem 0.4rem;
+		border: 1px dashed var(--vr-line-muted);
+		color: var(--vr-faint);
+		font-size: 0.66rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.card:hover .break-tag {
+		border-color: rgba(0, 0, 0, 0.6);
+		color: rgba(0, 0, 0, 0.75);
 	}
 
 	.card:hover .card-meta {
