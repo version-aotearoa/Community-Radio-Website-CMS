@@ -4,6 +4,7 @@
 	import Turnstile from '$lib/components/Turnstile.svelte';
 	import GifPicker from '$lib/components/GifPicker.svelte';
 	import Seo from '$lib/components/Seo.svelte';
+	import { displayNameFor, needsDisplayName } from '$lib/displayName';
 
 	let { data } = $props();
 
@@ -88,7 +89,9 @@
 	// Name assigned by the worker for this session (Listener N or account name).
 	let assignedName = $state('');
 	const user = $derived(data.user);
-	const displayName = $derived(user ? user.name || user.email || 'Listener' : assignedName || handle || 'Listener');
+	const displayName = $derived(
+		user ? displayNameFor(user) : assignedName || handle || 'Listener'
+	);
 
 	$effect(() => {
 		if (scrollEl && messages.length) {
@@ -376,6 +379,12 @@
 				</div>
 				{/each}
 			</div>
+			{#if user && needsDisplayName(user)}
+				<a class="name-nudge" href="/account">
+					You're chatting as “Listener”. Set a display name
+					<span aria-hidden="true">→</span>
+				</a>
+			{/if}
 			<form
 				class="composer"
 				onsubmit={(e) => {
@@ -653,6 +662,23 @@
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
 		border-top: 1px solid var(--vr-line);
+	}
+
+	.name-nudge {
+		display: block;
+		padding: 0.45rem 1rem;
+		border-top: 1px solid var(--vr-line-muted);
+		background: var(--vr-surface-low);
+		color: var(--vr-muted);
+		font-family: var(--vr-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.02em;
+		text-decoration: none;
+	}
+
+	.name-nudge:hover {
+		color: var(--vr-text);
+		text-decoration: underline;
 	}
 
 	.gif-btn {

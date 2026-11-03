@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { displayNameFor } from '$lib/displayName';
 import type { RequestHandler } from './$types';
 
 const TTL_SECONDS = 600;
@@ -31,15 +32,18 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
+	// Never the email: the chat worker broadcasts and stores this as the author
+	// name of every message. Accounts without a name show as "Listener".
+	const name = displayNameFor(user);
+
 	const payload = b64url(
 		JSON.stringify({
 			uid: user.id,
-			name: user.name || user.email,
+			name,
 			exp: Math.floor(Date.now() / 1000) + TTL_SECONDS
 		})
 	);
 	const sig = await hmacHex(payload, secret);
-	const name = user.name || user.email;
 
 	return json({ token: `${payload}.${sig}`, name });
 };

@@ -25,6 +25,21 @@ See [ROADMAP.md](ROADMAP.md) for planned features (push notifications).
 - [`docs/shows-schedule.md`](docs/shows-schedule.md) — shows/broadcasts data model + recurrence/4-week-cycle math.
 - Live stream, now-playing, replays and artwork come from the self-hosted **AzuraCast** backend (`stream.version.nz`) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend).
 
+## Accounts and chat identity
+
+Sign-in is Better Auth: email magic links plus Google/GitHub (each button only
+appears when its `*_ID`/`*_SECRET` env vars are set). Every account has a `user`
+row (`name`, `email`, `role`, `active`); social sign-ins also store an `account`
+row with the provider tokens.
+
+**An email address is never a display name.** `displayNameFor()`
+(`src/lib/displayName.ts`) resolves the public name — the account's `name`, or
+`Listener` when it is empty or looks like an address. `/api/chat/identity` signs
+that name into the chat token, so it can't leak into a message; the chat worker
+also coerces any inbound name containing `@` and rewrites stored ones
+(`ChatRoom` migration 7). Accounts without a name are nudged to set one from the
+chat composer, the login page and My Version → Profile.
+
 ## AzuraCast (streaming backend)
 
 AzuraCast is an **external, self-hosted dependency** (not run by the app). Instance: `https://stream.version.nz` — station id `1`, shortcode `version_radio`, configured in `src/lib/azuracast.ts` (the public endpoints used need **no API key**). It provides the 24/7 live HLS stream (AutoDJ re-air + live DJ input), now-playing/live metadata, on-demand replays, and artwork.

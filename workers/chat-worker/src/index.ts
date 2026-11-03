@@ -140,6 +140,17 @@ export class ChatRoom extends DurableObject<Env> {
 				INSERT INTO _sql_schema_migrations (id) VALUES (6);
 			`);
 		}
+		if (version < 7) {
+			// Author names must never expose email addresses. Older app identities
+			// fell back to the account email when no display name was set; rewrite
+			// those already-stored messages (signed-in rows only — anonymous
+			// handles are left alone). Idempotent, so a re-run is harmless.
+			this.ctx.storage.sql.exec(`
+				UPDATE messages SET name = 'Listener'
+				WHERE user_id IS NOT NULL AND instr(name, '@') > 0;
+				INSERT INTO _sql_schema_migrations (id) VALUES (7);
+			`);
+		}
 	}
 
 	/** Allocate the next anonymous handle: `Listener N` (per room, sequential). */
@@ -178,7 +189,10 @@ export class ChatRoom extends DurableObject<Env> {
 				const identity = await this.verifyIdentity(token);
 				if (!identity) return new Response('Unauthorized', { status: 401 });
 				uid = identity.uid;
+				// Belt and braces: never persist/broadcast an email as a name, even
+				// if a token was minted before the app stopped sending them.
 				name = identity.name.slice(0, MAX_NAME_LENGTH);
+				if (name.includes('@')) name = 'Listener';
 			} else if (!name && url.searchParams.get('anonymous') === '1') {
 				name = this.nextListenerName();
 			}

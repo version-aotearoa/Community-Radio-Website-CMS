@@ -5,6 +5,7 @@
 	import { authClient } from '$lib/client';
 	import Turnstile from '$lib/components/Turnstile.svelte';
 	import Seo from '$lib/components/Seo.svelte';
+	import { displayNameFor, needsDisplayName } from '$lib/displayName';
 
 	let { data } = $props();
 
@@ -79,6 +80,11 @@
 			}
 		}
 		const name = displayName.trim().slice(0, 50);
+		if (name.includes('@')) {
+			error = 'Use a display name, not an email address.';
+			busy = false;
+			return;
+		}
 		const res = await authClient.signIn.magicLink({
 			email,
 			callbackURL: '/',
@@ -115,8 +121,14 @@
 		{#if user}
 			<h1>Signed in</h1>
 			<p class="muted">
-				You're signed in as <strong>{user.name || user.email}</strong>.
+				You're signed in as <strong>{displayNameFor(user)}</strong>.
 			</p>
+			{#if needsDisplayName(user)}
+				<p class="muted">
+					Set a display name so chat doesn't show you as “Listener” —
+					<a class="hint-link" href="/account">My Version → Profile</a>
+				</p>
+			{/if}
 			<Button css="vr-cta ghost" type="primary" onclick={signOut}>Sign out</Button>
 		{:else}
 			<h1>Sign in to Version Radio</h1>
@@ -249,6 +261,11 @@
 	.muted {
 		color: var(--vr-muted);
 		margin: 0 0 1.25rem;
+	}
+
+	.hint-link {
+		color: var(--vr-text);
+		text-decoration: underline;
 	}
 
 	.terms {

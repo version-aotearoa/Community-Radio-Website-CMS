@@ -9,6 +9,7 @@
 	import SocialLinks from '$lib/components/SocialLinks.svelte';
 	import { initBannerDismissed, initPwa, registerServiceWorker } from '$lib/pwa';
 	import { requestCollapsePlayer } from '$lib/stores/player';
+	import { displayNameFor } from '$lib/displayName';
 	import { authClient } from '$lib/client';
 	import { SITE_TITLE } from '$lib/site';
 	import '@fontsource/anton/latin.css';
@@ -206,7 +207,11 @@
 			</nav>
 			{#if user}
 				<div class="account">
-					<a class="avatar" href="/account" title={user.email} aria-label="My Version: {user.name || user.email}">
+					<a
+						class="avatar"
+						href="/account"
+						aria-label="My Version: {displayNameFor(user)}"
+					>
 						{#if user.image}
 							<img class="avatar-img" src={user.image} alt="" />
 						{:else}
