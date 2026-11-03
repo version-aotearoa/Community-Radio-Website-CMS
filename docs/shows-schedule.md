@@ -70,6 +70,10 @@ stream cache (`stream_url`, `stream_expires_at`, `stream_format`,
 - `follow_show(show_id)`, `saved_episode(broadcast_id)` and
   `favourite_broadcast(broadcast_id)` — the last two have real FKs to
   `broadcast(id) ON DELETE CASCADE`.
+- `saved_track(broadcast_id, mark_seconds)` — per-user cue points for **My
+  Version → Tracks** (`0029`). A row is a snapshot (title/artist/album) of a
+  tracklist row plus its position in the episode recording, keyed on the cue
+  second rather than `track.id` so DJ tracklist rewrites can't orphan it.
 
 ## 2. Show kinds
 

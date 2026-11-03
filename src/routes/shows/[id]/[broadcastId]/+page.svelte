@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import ShowActions from '$lib/components/ShowActions.svelte';
 	import {
 		clearPlayQueue,
 		playback,
+		playbackBlocked,
 		playMedia,
 		requestSeek,
 		requestSetPlaying,
@@ -13,6 +14,7 @@
 		streamPlaying
 	} from '$lib/stores/player';
 	import { formatTrackTime } from '$lib/trackTime';
+	import PlayFromHere from '$lib/components/PlayFromHere.svelte';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
@@ -68,6 +70,10 @@
 		setTimeout(() => void invalidateAll(), 0);
 		// Fill in name/artist/art for any not-yet-resolved Bandcamp rows.
 		void prefetchMissing();
+
+		// Deep link from a copied/saved cue: start the recording at that point.
+		const t = Number(page.url.searchParams.get('t'));
+		if (Number.isFinite(t) && t > 0) startDeepLink(Math.floor(t));
 	});
 
 	function fmtDate(dateStr: string) {
@@ -277,11 +283,12 @@
 	/**
 	 * Jump into the recording from a tracklist cue marker. If this replay is
 	 * already loaded, seek in place (no reload); otherwise start it at the mark.
+	 * `trackId` is null for deep links, where the row is found by its mark.
 	 */
-	function seekReplay(trackId: string, seconds: number) {
+	function seekReplay(trackId: string | null, seconds: number) {
 		const url = broadcast.replay_url;
 		if (!url || $unavailableReplays.has(url)) return;
-		activeMarkId = trackId;
+		activeMarkId = trackId ?? tracks.find((t) => t.mark_seconds === seconds)?.id ?? null;
 		const current = $playback;
 		if (current.kind === 'media' && current.url === url) {
 			requestSetPlaying(true);
@@ -292,6 +299,127 @@
 		playMedia(replaySource(seconds));
 	}
 
+	/* ---- Saved cues ("Tracks" in My Version) + copy link ---- */
+
+	let savedCues = $state<number[]>([]);
+	$effect(() => {
+		savedCues = data.savedCues ?? [];
+	});
+
+	let copiedCue = $state<number | null>(null);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Absolute link that opens this episode at a cue position. */
+	function cueHref(seconds: number): string {
+		const origin = typeof location === 'undefined' ? '' : location.origin;
+		return `${origin}/shows/${show.id}/${broadcast.id}?t=${seconds}`;
+	}
+
+	async function toggleCue(t: TrackRow) {
+		const seconds = t.mark_seconds;
+		if (seconds === null) return;
+		if (!data.user) {
+			loginHint = { show: true, kind: 'track' };
+			return;
+		}
+		loginHint = null;
+		const prev = savedCues;
+		savedCues = prev.includes(seconds)
+			? prev.filter((s) => s !== seconds)
+			: [...prev, seconds];
+		const res = await fetch(
+			`/api/shows/${show.id}/broadcasts/${broadcast.id}/saved-track`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					markSeconds: seconds,
+					title: t.title,
+					artist: t.artist,
+					album: t.album
+				})
+			}
+		).catch(() => null);
+		if (!res || !res.ok) {
+			savedCues = prev;
+			if (res?.status === 401) loginHint = { show: true, kind: 'track' };
+			return;
+		}
+		const body = (await res.json().catch(() => null)) as { saved?: boolean } | null;
+		const nowSaved = body?.saved ?? !prev.includes(seconds);
+		savedCues = nowSaved
+			? Array.from(new Set([...savedCues, seconds]))
+			: savedCues.filter((s) => s !== seconds);
+	}
+
+	async function copyCue(seconds: number) {
+		try {
+			await navigator.clipboard.writeText(cueHref(seconds));
+		} catch {
+			return;
+		}
+		copiedCue = seconds;
+		if (copyTimer) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => (copiedCue = null), 1600);
+	}
+
+	/* ---- Shared-link helper: "Play from here" when autoplay is blocked ---- */
+
+	let deepLink = $state<{ seconds: number; track: TrackRow | null } | null>(null);
+	let deepLinkPrompt = $state<{ seconds: number; track: TrackRow | null } | null>(null);
+	let deepLinkTimer: ReturnType<typeof setTimeout> | null = null;
+	/** "Not now" wins for the rest of this page view. */
+	let deepLinkDismissed = $state(false);
+
+	const replayUnavailable = $derived(
+		!!broadcast.replay_url && $unavailableReplays.has(broadcast.replay_url)
+	);
+
+	/** Remember the shared moment, try to play it, and arm the fallback prompt. */
+	function startDeepLink(seconds: number) {
+		if (!broadcast.replay_url || replayUnavailable) return;
+		deepLink = { seconds, track: tracks.find((t) => t.mark_seconds === seconds) ?? null };
+		seekReplay(null, seconds);
+		// A blocked browser either rejects play() (playbackBlocked) or silently
+		// stays paused — this timer covers the silent case.
+		if (deepLinkTimer) clearTimeout(deepLinkTimer);
+		deepLinkTimer = setTimeout(() => {
+			deepLinkTimer = null;
+			if (deepLink && !$streamPlaying && !deepLinkDismissed) deepLinkPrompt = deepLink;
+		}, 1500);
+	}
+
+	$effect(() => {
+		// A definitive autoplay rejection can show the prompt straight away.
+		if ($playbackBlocked && deepLink && !$streamPlaying && !deepLinkDismissed) {
+			deepLinkPrompt = deepLink;
+		}
+	});
+
+	$effect(() => {
+		// Audio is playing: never leave the prompt covering it.
+		if ($streamPlaying && deepLinkPrompt) deepLinkPrompt = null;
+	});
+
+	/** The prompt's confirm is a user gesture, so playback is allowed. */
+	function playDeepLink() {
+		const target = deepLinkPrompt ?? deepLink;
+		deepLinkPrompt = null;
+		deepLinkDismissed = true;
+		if (!target) return;
+		seekReplay(null, target.seconds);
+	}
+
+	function dismissDeepLink() {
+		deepLinkDismissed = true;
+		deepLinkPrompt = null;
+	}
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+		if (deepLinkTimer) clearTimeout(deepLinkTimer);
+	});
+
 	function replayActive(): boolean {
 		const url = broadcast.replay_url;
 		if (!url) return false;
@@ -299,7 +427,9 @@
 		return current.kind === 'media' && current.url === url && $streamPlaying;
 	}
 
-	let loginHint = $state<{ show: boolean; kind: 'follow' | 'save' | 'favourite' } | null>(null);
+	let loginHint = $state<{ show: boolean; kind: 'follow' | 'save' | 'favourite' | 'track' } | null>(
+		null
+	);
 
 	let lightboxOpen = $state(false);
 
@@ -352,6 +482,81 @@
 		{:else}
 			<span class="mark none" aria-hidden="true"></span>
 		{/if}
+	{/if}
+{/snippet}
+
+{#snippet cueCell(t: TrackRow)}
+	{#if hasMarks}
+		{@const sec = t.mark_seconds}
+		{@const isSaved = sec !== null && savedCues.includes(sec)}
+		<button
+			class="cue-btn heart"
+			class:active={isSaved}
+			disabled={sec === null}
+			aria-pressed={isSaved}
+			aria-label={sec === null
+				? 'No time mark for this track'
+				: `${isSaved ? 'Remove' : 'Save'} ${formatTrackTime(sec)} ${isSaved ? 'from' : 'to'} My Version`}
+			title={sec === null
+				? 'No time mark for this track'
+				: isSaved
+					? 'Remove from My Version'
+					: 'Save to My Version'}
+			onclick={() => void toggleCue(t)}
+		>
+			<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+				<path
+					d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"
+					fill={isSaved ? 'currentColor' : 'none'}
+					stroke="currentColor"
+					stroke-width="1.8"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				/>
+			</svg>
+		</button>
+		<button
+			class="cue-btn"
+			disabled={sec === null}
+			aria-label={sec === null
+				? 'No time mark for this track'
+				: `Copy link to ${formatTrackTime(sec)}`}
+			title={sec === null ? 'No time mark for this track' : 'Copy link to this point'}
+			onclick={() => sec !== null && void copyCue(sec)}
+		>
+			{#if sec !== null && copiedCue === sec}
+				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+					<path
+						d="M4 12.5l5 5L20 6.5"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			{:else}
+				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+					<rect
+						x="9"
+						y="9"
+						width="11"
+						height="11"
+						rx="1.5"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+					/>
+					<path
+						d="M6 15V5.5A1.5 1.5 0 0 1 7.5 4H17"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+						stroke-linecap="round"
+					/>
+				</svg>
+			{/if}
+		</button>
 	{/if}
 {/snippet}
 
@@ -437,7 +642,9 @@
 					? 'Sign in to follow shows'
 					: loginHint.kind === 'save'
 						? 'Sign in to save broadcasts'
-						: 'Sign in to favourite recordings'} — <a class="hint-link" href="/login">Sign in</a>
+						: loginHint.kind === 'track'
+							? 'Sign in to save tracks to My Version'
+							: 'Sign in to favourite recordings'} — <a class="hint-link" href="/login">Sign in</a>
 			</div>
 		{/if}
 	</div>
@@ -456,6 +663,7 @@
 						aria-current={activeMarkId === t.id ? 'true' : undefined}
 					>
 						<span class="num">{i + 1}</span>
+						{@render cueCell(t)}
 						{@render markCell(t)}
 						{#if rowArt(t)}
 							<img class="bc-art" src={rowArt(t)} alt="" width="28" height="28" loading="lazy" />
@@ -506,6 +714,7 @@
 						aria-current={activeMarkId === t.id ? 'true' : undefined}
 					>
 						<span class="num">{i + 1}</span>
+						{@render cueCell(t)}
 						{@render markCell(t)}
 						{#if t.title}
 							<span class="track-title">{t.title}</span>
@@ -531,6 +740,18 @@
 		<p class="hint">No tracklist for this broadcast.</p>
 	{/if}
 </section>
+
+{#if deepLinkPrompt}
+	<PlayFromHere
+		seconds={deepLinkPrompt.seconds}
+		title={deepLinkPrompt.track?.title || deepLinkPrompt.track?.artist || show.title}
+		artist={deepLinkPrompt.track?.artist || null}
+		meta={`${show.title} · ${fmtDate(broadcast.date)}`}
+		art={artUrl}
+		onplay={playDeepLink}
+		ondismiss={dismissDeepLink}
+	/>
+{/if}
 
 {#if lightboxOpen}
 	<div
@@ -678,6 +899,38 @@
 
 	.mark.none {
 		visibility: hidden;
+	}
+
+	/* Heart (save cue to My Version) + copy-link, sized to sit inside a row. */
+	.cue-btn {
+		display: inline-grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		flex-shrink: 0;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--vr-muted);
+		padding: 0;
+		cursor: pointer;
+	}
+
+	.cue-btn:hover:not(:disabled) {
+		border-color: var(--vr-line);
+		color: var(--vr-text);
+	}
+
+	.cue-btn.heart.active {
+		color: var(--vr-red);
+	}
+
+	.cue-btn:disabled {
+		color: var(--vr-line-muted);
+		cursor: default;
+	}
+
+	.cue-btn svg {
+		display: block;
 	}
 
 	/* Row whose cue marker was clicked: stays lit while the recording plays. */

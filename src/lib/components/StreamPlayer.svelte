@@ -6,6 +6,7 @@
 		autoplay,
 		playback,
 		advancePlayQueue,
+		playbackBlocked,
 		playerCollapse,
 		playerPosition,
 		playerRequest,
@@ -216,7 +217,10 @@
 			stopLive();
 			audioEl.src = p.url;
 			setLoading(true, 'switch:media');
-			audioEl.play().catch(() => setLoading(false, 'play-rejected:switch-media'));
+			audioEl.play().catch(() => {
+				setLoading(false, 'play-rejected:switch-media');
+				playbackBlocked.set(true);
+			});
 		} else {
 			stopMedia();
 			initLiveEngine();
@@ -416,6 +420,7 @@
 			// trace stays visible across the load; `play` fires far too early.
 			audioEl.addEventListener('playing', () => {
 				streamPlaying.set(true);
+				playbackBlocked.set(false);
 				setLoading(false, 'event:playing');
 				clearStallWatchdog();
 			});

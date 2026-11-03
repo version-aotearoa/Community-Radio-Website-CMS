@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { Button, Field, Text } from '@svar-ui/svelte-core';
 	import { authClient } from '$lib/client';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
+	import { formatTrackTime } from '$lib/trackTime';
 	import Seo from '$lib/components/Seo.svelte';
 
 	let { data } = $props();
@@ -23,7 +24,24 @@
 
 	const user = $derived(data.user);
 	let busy = $state(false);
-	let activeTab = $state<'profile' | 'following' | 'saved' | 'favourites'>('profile');
+	let activeTab = $state<'profile' | 'following' | 'saved' | 'tracks' | 'favourites'>('profile');
+
+	let savedTracks = $state(untrack(() => [...data.savedTracks]));
+	// Server truth wins after a revalidation (onMount invalidateAll / navigation).
+	$effect(() => {
+		savedTracks = data.savedTracks;
+	});
+
+	async function removeCue(t: { show_id: string; broadcast_id: string; mark_seconds: number }) {
+		const res = await fetch(
+			`/api/shows/${t.show_id}/broadcasts/${t.broadcast_id}/saved-track?t=${t.mark_seconds}`,
+			{ method: 'DELETE' }
+		).catch(() => null);
+		if (!res || !res.ok) return;
+		savedTracks = savedTracks.filter(
+			(x) => !(x.broadcast_id === t.broadcast_id && x.mark_seconds === t.mark_seconds)
+		);
+	}
 
 	let editingName = $state(false);
 	let nameInput = $state('');
@@ -158,6 +176,13 @@
 		</button>
 		<button class="tab" class:active={activeTab === 'saved'} onclick={() => (activeTab = 'saved')}>
 			Saved
+		</button>
+		<button
+			class="tab"
+			class:active={activeTab === 'tracks'}
+			onclick={() => (activeTab = 'tracks')}
+		>
+			Tracks
 		</button>
 		<button
 			class="tab"
@@ -330,6 +355,63 @@
 									<span class="mono meta">{fmtDate(s.date)}</span>
 								</span>
 							</a>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
+
+	{#if activeTab === 'tracks'}
+		<section class="card">
+			<h2 class="card-title">Tracks</h2>
+			{#if savedTracks.length === 0}
+				<p class="muted">
+					No saved tracks yet. Tap the heart beside a track's time on any episode to keep the
+					moment here.
+				</p>
+			{:else}
+				<ul>
+					{#each savedTracks as t (`${t.broadcast_id}:${t.mark_seconds}`)}
+						{@const sArt = episodeArtOrDefault(t.broadcast_id, t, { image: t.image })}
+						<li class="track-item">
+							<a
+								class="saved-row"
+								href={`/shows/${t.show_id}/${t.broadcast_id}?t=${t.mark_seconds}`}
+							>
+								<span class="saved-art">
+									{#if sArt}
+										<img
+											src={sArt}
+											alt=""
+											loading="lazy"
+											onerror={(e) => artOnError(e, t.image)}
+										/>
+									{:else}
+										<svg viewBox="0 0 80 70" fill="currentColor" width="20" height="17" aria-hidden="true">
+											<path
+												fill-rule="evenodd"
+												d="M0 0H40V40H50V0H80V45H70V60H55V70H25V60H10V45H0V5ZM10 5H5V40H15V55H30V65H50V55H65V40H75V5H55V45H35V5H15Z"
+											/>
+										</svg>
+									{/if}
+								</span>
+								<span class="saved-info">
+									<span class="h-sm">{t.title || t.artist || 'Track'}</span>
+									<span class="mono meta">
+										{formatTrackTime(t.mark_seconds)}{#if t.artist} · {t.artist}{/if}{#if t.album} · {t.album}{/if}
+									</span>
+									<span class="mono meta">{t.show_title} · {fmtDate(t.date)}</span>
+								</span>
+							</a>
+							<button
+								class="cue-remove"
+								onclick={() => removeCue(t)}
+								aria-label={`Remove ${t.title || 'track'} at ${formatTrackTime(t.mark_seconds)} from My Version`}
+								title="Remove from My Version"
+							>
+								×
+							</button>
 						</li>
 					{/each}
 				</ul>
@@ -546,6 +628,37 @@
 
 	.card ul li:first-child .saved-row {
 		border-top: none;
+	}
+
+	.track-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.track-item .saved-row {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.cue-remove {
+		flex-shrink: 0;
+		width: 28px;
+		height: 28px;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--vr-line-muted);
+		background: transparent;
+		color: var(--vr-muted);
+		font-size: 1rem;
+		line-height: 1;
+		padding: 0;
+		cursor: pointer;
+	}
+
+	.cue-remove:hover {
+		border-color: var(--vr-line);
+		color: var(--vr-text);
 	}
 
 	.saved-art {

@@ -58,6 +58,13 @@ export const playerCollapse = writable<PlayerRequest>({ n: 0 });
 /** Whether audio is currently playing (live or recording). */
 export const streamPlaying = writable(false);
 
+/**
+ * True when the browser refused to start playback (autoplay policy). Set by the
+ * player on a rejected `play()`, cleared once audio actually starts — used by
+ * shared-link pages to offer a "play from here" prompt.
+ */
+export const playbackBlocked = writable(false);
+
 /** Ask the player to ensure a given state (idempotent — safe against duplicates). */
 export function requestSetPlaying(play: boolean) {
 	playerSet.update((p) => ({ n: p.n + 1, play }));
