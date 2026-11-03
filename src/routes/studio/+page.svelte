@@ -626,6 +626,77 @@
 		return false;
 	}
 
+	/* ---- Show breaks (pause / resume) ---- */
+
+	let pauseTarget = $state<{ id: string; title: string } | null>(null);
+	let pauseUntil = $state('');
+	let pauseBusy = $state(false);
+
+	async function showPost(id: string, action: string, value: unknown): Promise<boolean> {
+		adminError = '';
+		const res = await fetch(`/api/admin/shows/${id}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ action, value })
+		});
+		if (res.ok) return true;
+		const body = (await res.json().catch(() => null)) as { error?: string } | null;
+		adminError = body?.error ?? `Save failed (${res.status})`;
+		return false;
+	}
+
+	function startPause(show: ShowRow) {
+		pauseTarget = { id: show.id, title: show.title };
+		pauseUntil = show.paused_until ?? '';
+	}
+
+	async function confirmPause() {
+		if (!pauseTarget) return;
+		const target = pauseTarget;
+		pauseBusy = true;
+		const ok = await showPost(target.id, 'pause', pauseUntil.trim() || null);
+		pauseBusy = false;
+		if (!ok) {
+			flashFeedback(showFeedback, target.id, adminError, false);
+			return;
+		}
+		flashFeedback(showFeedback, target.id, 'Show paused', true);
+		pauseTarget = null;
+		await invalidateAll();
+	}
+
+	async function resumeShow(show: ShowRow) {
+		if (await showPost(show.id, 'resume', true)) {
+			flashFeedback(showFeedback, show.id, 'Show resumed', true);
+			await invalidateAll();
+		} else {
+			flashFeedback(showFeedback, show.id, adminError, false);
+		}
+	}
+
+	/** DJ bulk break: optional end date via a small prompt (blank = until resumed). */
+	async function pauseDjShowRun(u: AdminUser) {
+		const answer = prompt(
+			`Pause all shows for ${u.name || u.email}.\n\nUntil which date? (YYYY-MM-DD — leave blank to pause until resumed)`,
+			''
+		);
+		if (answer === null) return;
+		const until = answer.trim();
+		if (until !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+			flashFeedback(userFeedback, u.id, 'Use YYYY-MM-DD or leave blank', false);
+			return;
+		}
+		const ok = await adminPost(u.id, 'pause-shows', until || null);
+		flashFeedback(userFeedback, u.id, ok ? 'Shows paused' : adminError, ok);
+		if (ok) await invalidateAll();
+	}
+
+	async function resumeDjShowRun(u: AdminUser) {
+		const ok = await adminPost(u.id, 'resume-shows', null);
+		flashFeedback(userFeedback, u.id, ok ? 'Shows resumed' : adminError, ok);
+		if (ok) await invalidateAll();
+	}
+
 	async function setActive(u: AdminUser, active: boolean) {
 		if (await adminPost(u.id, 'active', active)) {
 			u.active = active ? 1 : 0;
@@ -1298,6 +1369,10 @@
 								>
 									{u.active ? 'Deactivate' : 'Activate'}
 								</button>
+								{#if u.role !== 'listener'}
+									<button class="mini-btn" onclick={() => pauseDjShowRun(u)}>Pause shows</button>
+									<button class="mini-btn" onclick={() => resumeDjShowRun(u)}>Resume shows</button>
+								{/if}
 							</div>
 						{/if}
 					{/each}
@@ -1341,6 +1416,27 @@
 					</button>
 				{/each}
 			</div>
+		{/if}
+		{#if pauseTarget}
+			<form
+				class="pause-panel"
+				onsubmit={(e) => {
+					e.preventDefault();
+					confirmPause();
+				}}
+			>
+				<span class="mono">
+					Pause <strong>{pauseTarget.title}</strong> — episodes from today are hidden.
+				</span>
+				<label class="mono">
+					Until (optional)
+					<input class="vr-input" type="date" bind:value={pauseUntil} />
+				</label>
+				<Button css="vr-cta" type="primary" disabled={pauseBusy} onclick={confirmPause}>
+					{pauseBusy ? 'Pausing…' : 'Pause show'}
+				</Button>
+				<Button css="vr-cta ghost" onclick={() => (pauseTarget = null)}>Cancel</Button>
+			</form>
 		{/if}
 		{#if mgrShows.length === 0}
 			<p class="muted">
@@ -1388,6 +1484,14 @@
 							</span>
 						{/if}
 						<button class="mini-btn" onclick={() => startEditShow(show)}>Edit</button>
+						{#if show.kind !== 'event'}
+							{#if show.paused}
+								<span class="meta">On break</span>
+								<button class="mini-btn" onclick={() => resumeShow(show)}>Resume</button>
+							{:else}
+								<button class="mini-btn" onclick={() => startPause(show)}>Pause</button>
+							{/if}
+						{/if}
 					</div>
 					{#if editingShowId === show.id}
 						<form
@@ -1820,6 +1924,32 @@
 		border-top: 1px solid var(--vr-line);
 		margin-top: 0.5rem;
 		padding: 1rem 0 0.5rem;
+	}
+
+	.pause-panel {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0 0 1rem;
+		padding: 0.75rem 0.85rem;
+		border: 1px solid var(--vr-line);
+		background: var(--vr-surface-low);
+		font-size: 0.82rem;
+	}
+
+	.pause-panel label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: var(--vr-muted);
+		font-size: 0.78rem;
+	}
+
+	.pause-panel input[type='date'] {
+		width: auto;
+		font-family: var(--vr-font-mono);
+		font-size: 0.8rem;
 	}
 
 	.edit-actions {

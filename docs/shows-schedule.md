@@ -35,6 +35,9 @@ date helpers, recurrence and cycle math).
 | `kind` | TEXT | `'show'` (default) or `'event'` (`0015`) |
 | `event_type` | TEXT | `'guest-mix'` \| `'hifi-session'` \| null — events only (`0025`) |
 | `active` | INTEGER | 1 = listed publicly |
+| `paused` | INTEGER | 1 = on a break; future episodes hidden (`0030`) |
+| `paused_until` | TEXT | YYYY-MM-DD end of the break; NULL = until resumed (`0030`) |
+| `paused_at` | TEXT | YYYY-MM-DD the current break began (`0030`) |
 | `created_at` / `updated_at` | INTEGER | unix seconds |
 
 Indexes: `(dj_id)`, `(day_of_week, start_minutes)`.
@@ -53,9 +56,10 @@ Indexes: `(dj_id)`, `(day_of_week, start_minutes)`.
 | `featured` | INTEGER | homepage "Featured Shows" (`0017`) |
 | `home_ready` | INTEGER | homepage "Latest Shows" (`0020`) |
 | `art` | TEXT | admin artwork override (`0021`) |
+| `cancelled` | INTEGER | 1 = hidden from public lists, still reachable by URL (`0030`) |
 | `created_at` / `updated_at` | INTEGER | unix seconds |
 
-Indexes: `(show_id, date)`, `(date)`.
+Indexes: `(show_id, date)`, `(date)`, `(cancelled)`.
 
 ### `track` — tracklist rows (belong to a **broadcast**, not a show)
 
@@ -75,8 +79,26 @@ stream cache (`stream_url`, `stream_expires_at`, `stream_format`,
   tracklist row plus its position in the episode recording, keyed on the cue
   second rather than `track.id` so DJ tracklist rewrites can't orphan it.
 
-## 2. Show kinds
+### Cancelling an episode / taking a break (`0030`)
 
+**Cancellation is a flag, never a delete.** `ensureBroadcasts()` re-materialises
+every scheduled slot with `INSERT OR IGNORE`, so a deleted row would reappear on
+the next page load. `broadcast.cancelled = 1` hides the episode from every public
+list (schedule, home, archive, on-air match, overlap checks) while the URL stays
+reachable and shows a “cancelled” notice; `cancelled = 0` restores it.
+
+A **show break** sets `show.paused = 1` (+ optional `paused_until`), cancels that
+show's broadcasts inside the window, and makes `ensureBroadcasts()` skip the same
+window. Resuming clears the flags, un-cancels `date >= today` and re-materialises
+the 12-week horizon from `anchor_date`, so the 2/4-week cycle phase is preserved.
+`past` episodes and the archive are never touched. One-off events can't be paused.
+
+Admin endpoints: `POST /api/admin/broadcasts/:id` (`cancel`/`restore`),
+`DELETE /api/admin/broadcasts/:id` (hard delete), `POST /api/admin/shows/:id`
+(`pause`, `resume`), `POST /api/admin/users/:id` (`pause-shows`,
+`resume-shows`).
+
+## 2. Show kinds
 - **`kind='show'`** — a slot that recurs (see §3).
 - **`kind='event'`** — a one-off. `createShow` inserts the show **and exactly one
   broadcast** (id `<slug>-<date>`); `ensureBroadcasts` returns `[]` for events.

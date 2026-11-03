@@ -11,12 +11,32 @@
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
+	import type { BroadcastRow } from '$lib/server/shows';
 
 	let { data } = $props();
 
 	const show = $derived(data.show);
 	const upcoming = $derived(data.upcoming);
 	const past = $derived(data.past);
+
+	/** Editors (admin or the owning DJ): cancel/restore an episode, or delete it. */
+	async function toggleEpisodeCancelled(b: BroadcastRow) {
+		await fetch(`/api/admin/broadcasts/${b.id}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ action: b.cancelled ? 'restore' : 'cancel' })
+		}).catch(() => null);
+		await invalidateAll();
+	}
+
+	async function deleteEpisode(b: BroadcastRow) {
+		const ok = confirm(
+			`Delete the ${fmtDate(b.date)} episode for good?\n\nIts tracklist, bookmarks, favourites and saved cues are removed. This cannot be undone.`
+		);
+		if (!ok) return;
+		await fetch(`/api/admin/broadcasts/${b.id}`, { method: 'DELETE' }).catch(() => null);
+		await invalidateAll();
+	}
 
 	// Replay availability is probed after paint (never during render).
 	onMount(() => {
@@ -240,6 +260,15 @@
 			{#if djName && show.kind !== 'event'}
 				<p class="dj mono">with {djName}</p>
 			{/if}
+			{#if show.paused}
+				<p class="break-banner mono">
+					{#if show.paused_until}
+						On break until {fmtDate(show.paused_until)}
+					{:else}
+						On break — episodes return when the show resumes
+					{/if}
+				</p>
+			{/if}
 			{#if editing}
 				<form class="edit-form" onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
 					<Field label="Title">
@@ -347,6 +376,15 @@
 								</svg>
 							</a>
 						{/if}
+						{#if b.cancelled}
+							<span class="tag-cancelled mono">Cancelled</span>
+						{/if}
+						{#if data.canEdit}
+							<button class="mini-action" onclick={() => toggleEpisodeCancelled(b)}>
+								{b.cancelled ? 'Restore' : 'Cancel'}
+							</button>
+							<button class="mini-action danger" onclick={() => deleteEpisode(b)}>Delete</button>
+						{/if}
 					</header>
 					<div class="replay">
 						<a class="view-show mono" href={`/shows/${show.id}/${b.id}`}>View <span class="arrow-chip" aria-hidden="true">→︎</span></a>
@@ -408,6 +446,17 @@
 											/>
 										</svg>
 									</a>
+								{/if}
+								{#if b.cancelled}
+									<span class="tag-cancelled mono">Cancelled</span>
+								{/if}
+								{#if data.canEdit}
+									<button class="mini-action" onclick={() => toggleEpisodeCancelled(b)}>
+										{b.cancelled ? 'Restore' : 'Cancel'}
+									</button>
+									<button class="mini-action danger" onclick={() => deleteEpisode(b)}>
+										Delete
+									</button>
 								{/if}
 							</header>
 							<div class="replay">
@@ -667,6 +716,49 @@
 		background: var(--vr-text);
 		color: var(--vr-black);
 		border-color: var(--vr-line);
+	}
+
+	.break-banner {
+		margin: 0.5rem 0 0;
+		padding: 0.4rem 0.7rem;
+		border: 1px dashed var(--vr-line);
+		background: var(--vr-surface-low);
+		color: var(--vr-muted);
+		font-size: 0.75rem;
+		display: inline-block;
+	}
+
+	.tag-cancelled {
+		font-size: 0.68rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--vr-faint);
+		border: 1px dashed var(--vr-line-muted);
+		padding: 0.15rem 0.4rem;
+		white-space: nowrap;
+	}
+
+	.mini-action {
+		background: transparent;
+		border: 1px solid var(--vr-line-muted);
+		color: var(--vr-muted);
+		font-family: var(--vr-font-mono);
+		font-size: 0.68rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		padding: 0.25rem 0.45rem;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.mini-action:hover {
+		color: var(--vr-text);
+		border-color: var(--vr-line);
+	}
+
+	.mini-action.danger:hover {
+		color: var(--vr-red);
+		border-color: var(--vr-red);
 	}
 
 	.hint {

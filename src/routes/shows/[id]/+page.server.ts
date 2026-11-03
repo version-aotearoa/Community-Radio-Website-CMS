@@ -18,12 +18,16 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	if (!show) error(404, 'Show not found');
 
 	await ensureBroadcasts(db, show);
-	const broadcasts = await getBroadcasts(db, show.id);
-	const tracks = await getBroadcastTracksMap(db, broadcasts.map((b) => b.id));
 
 	const user = locals.user ?? null;
 	const canEdit =
 		user !== null && (user.role === 'admin' || (user.role === 'dj' && show.dj_id === user.id));
+
+	// Cancelled episodes stay reachable by direct URL, but drop out of the
+	// public archive; editors still see them (badged) so they can restore.
+	const allBroadcasts = await getBroadcasts(db, show.id);
+	const broadcasts = canEdit ? allBroadcasts : allBroadcasts.filter((b) => b.cancelled === 0);
+	const tracks = await getBroadcastTracksMap(db, broadcasts.map((b) => b.id));
 
 	const today = todayStr();
 	const followed = user

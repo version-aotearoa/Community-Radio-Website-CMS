@@ -41,9 +41,9 @@ export const load: PageServerLoad = async ({ platform, locals, cookies }) => {
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
-			 WHERE s.active = 1 AND b.home_ready = 1 AND b.id = (
+			 WHERE s.active = 1 AND b.home_ready = 1 AND b.cancelled = 0 AND b.id = (
 				SELECT b2.id FROM broadcast b2
-				WHERE b2.show_id = b.show_id AND b2.home_ready = 1
+				WHERE b2.show_id = b.show_id AND b2.home_ready = 1 AND b2.cancelled = 0
 				ORDER BY b2.date DESC, b2.start_minutes DESC LIMIT 1
 			 )
 			 ORDER BY b.date DESC, b.start_minutes DESC
@@ -85,13 +85,13 @@ export const load: PageServerLoad = async ({ platform, locals, cookies }) => {
 
 	const curated = (
 		await db
-			.prepare(featuredSelect('WHERE b.featured = 1 AND s.active = 1 ORDER BY b.date DESC LIMIT 3'))
+			.prepare(featuredSelect('WHERE b.featured = 1 AND s.active = 1 AND b.cancelled = 0 ORDER BY b.date DESC LIMIT 3'))
 			.all()
 	).results as unknown as FeaturedRow[];
 	let rows = curated;
 	if (rows.length === 0) {
 		const fallback = await db
-			.prepare(featuredSelect('WHERE s.active = 1 ORDER BY b.date ASC, b.start_minutes ASC LIMIT 4'))
+			.prepare(featuredSelect('WHERE s.active = 1 AND b.cancelled = 0 ORDER BY b.date ASC, b.start_minutes ASC LIMIT 4'))
 			.all();
 		rows = fallback.results as unknown as FeaturedRow[];
 	}
