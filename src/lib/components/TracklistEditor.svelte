@@ -579,7 +579,7 @@
 <div class="page">
 <div class="editor-head">
 	<div>
-		<p class="eyebrow mono"><a href={breadcrumbHref}>DJ Studio</a> / Show</p>
+		<p class="eyebrow mono"><a href={breadcrumbHref}>{show.title}</a> / Show</p>
 		<h1>{show.title}</h1>
 		<p class="airdate mono">
 			Broadcast: <strong>{broadcast.date}</strong> · {fmtTime(broadcast.start_minutes)}
@@ -747,6 +747,14 @@
 					/>
 				</div>
 			{/if}
+			<button
+				class="strip-btn stamp"
+				onclick={stampSelected}
+				aria-label="Stamp the playing position into the selected row"
+				title="Stamp the playing position into the selected row"
+			>
+				Stamp time
+			</button>
 		{/if}
 	</div>
 
@@ -754,7 +762,6 @@
 		<Button css="vr-cta ghost" onclick={() => fileInput?.click()}>Import CSV</Button>
 		<Button css="vr-cta ghost" onclick={addTrack}>+ Add track</Button>
 		<Button css="vr-cta ghost" onclick={deleteSelected}>Delete selected</Button>
-		<Button css="vr-cta ghost" onclick={stampSelected}>Stamp time</Button>
 		<Button css="vr-cta" type="primary" disabled={saving} onclick={save}>
 			{saving ? 'Saving…' : 'Save tracklist'}
 		</Button>
@@ -923,6 +930,11 @@
 	.strip-btn.play.playing {
 		background: var(--vr-text);
 		color: var(--vr-black);
+	}
+
+	.strip-btn.stamp {
+		margin-left: auto;
+		border-color: var(--vr-line);
 	}
 
 	.strip-time {
