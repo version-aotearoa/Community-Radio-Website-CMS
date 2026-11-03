@@ -7,6 +7,7 @@ import {
 	replaceTracklist
 } from '$lib/server/shows';
 import type { TrackInput } from '$lib/server/shows';
+import { isValidMark } from '$lib/trackTime';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
@@ -37,7 +38,13 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 	if (!broadcast) return json({ error: 'No broadcast for this show' }, { status: 409 });
 
 	const body = (await request.json()) as {
-		tracks?: Array<{ title?: string; artist?: string; album?: string; url?: string }>;
+		tracks?: Array<{
+			title?: string;
+			artist?: string;
+			album?: string;
+			url?: string;
+			markSeconds?: unknown;
+		}>;
 	};
 	if (!Array.isArray(body.tracks)) {
 		return json({ error: 'tracks must be an array' }, { status: 400 });
@@ -47,9 +54,10 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 			title: String(t.title ?? ''),
 			artist: String(t.artist ?? ''),
 			album: String(t.album ?? ''),
-			url: String(t.url ?? '').trim() || null
+			url: String(t.url ?? '').trim() || null,
+			markSeconds: isValidMark(t.markSeconds) ? t.markSeconds : null
 		}))
-		.filter((t) => t.title.trim() !== '' || t.url !== null);
+		.filter((t) => t.title.trim() !== '' || t.url !== null || t.markSeconds !== null);
 
 	const tracks = await replaceTracklist(platform!.env.DB, broadcast.id, filtered);
 	return json(tracks);

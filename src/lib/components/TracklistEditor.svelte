@@ -5,7 +5,7 @@
 	import { get } from 'svelte/store';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import SeekControl from '$lib/components/SeekControl.svelte';
-	import { parseTracksCsv } from '$lib/csv';
+	import { parseTracksCsv, toTracksCsv, tracklistCsvFilename } from '$lib/csv';
 	import { formatTrackTime, parseTrackTime } from '$lib/trackTime';
 	import {
 		clearPlayQueue,
@@ -325,6 +325,43 @@
 		}
 	}
 
+	/**
+	 * Download the grid as CSV. Flushes the open cell editor first, and writes
+	 * the same headers the importer reads, so the file round-trips.
+	 */
+	async function exportCsv() {
+		error = '';
+		notice = '';
+		if (gridApi) await gridApi.exec('close-editor', {}).catch(() => {});
+		resyncFromGrid();
+		const rows = editable
+			.filter(
+				(t) => t.title.trim() !== '' || (t.url ?? '').trim() !== '' || t.mark_seconds !== null
+			)
+			.map((t) => ({
+				position: t.position,
+				markSeconds: t.mark_seconds,
+				title: t.title,
+				artist: t.artist,
+				album: t.album,
+				url: t.url
+			}));
+		if (rows.length === 0) {
+			notice = 'Nothing to export yet.';
+			return;
+		}
+		const blob = new Blob([toTracksCsv(rows)], { type: 'text/csv;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = tracklistCsvFilename(show.id, broadcast.date);
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+		notice = `Exported ${rows.length} row${rows.length === 1 ? '' : 's'} to CSV.`;
+	}
+
 	async function saveReplay() {
 		replayError = '';
 		replayNotice = '';
@@ -478,7 +515,8 @@
 				url: t.url ?? '',
 				markSeconds: t.mark_seconds
 			}))
-			.filter((t) => t.title.trim() !== '' || t.url.trim() !== '');
+			// Keep time-only rows: a cue can be placed before the title is filled in.
+			.filter((t) => t.title.trim() !== '' || t.url.trim() !== '' || t.markSeconds !== null);
 
 		const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/tracklist`, {
 			method: 'PUT',
@@ -549,7 +587,7 @@
 		}
 	}
 
-	let stampNotice = $state('');
+		let stampNotice = $state('');
 
 	/**
 	 * Fill the selected row's time with the player's current position in this
@@ -760,6 +798,7 @@
 
 	<div class="tracklist-actions">
 		<Button css="vr-cta ghost" onclick={() => fileInput?.click()}>Import CSV</Button>
+		<Button css="vr-cta ghost" onclick={exportCsv}>Export CSV</Button>
 		<Button css="vr-cta ghost" onclick={addTrack}>+ Add track</Button>
 		<Button css="vr-cta ghost" onclick={deleteSelected}>Delete selected</Button>
 		<Button css="vr-cta" type="primary" disabled={saving} onclick={save}>
