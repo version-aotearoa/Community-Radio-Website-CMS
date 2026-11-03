@@ -147,6 +147,11 @@ The tracklist editor has a **replay strip** above the grid — play/pause, skip
 without leaving edit mode. It drives the same global player as the public page,
 and falls back to “Set a replay link” when the episode has no recording.
 
+**Export CSV** writes the grid back out with the same headers the importer
+accepts (`#,time,title,artist,album,url`), BOM + CRLF for Excel, so a file
+round-trips through Import. Rows that only carry a Time are kept — a cue can
+exist before its title is filled in.
+
 **Saving a moment / sharing it.** Each public tracklist row carries a heart and a
 copy-link beside its number:
 

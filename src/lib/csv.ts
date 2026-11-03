@@ -1,4 +1,4 @@
-import { parseTrackTime } from '$lib/trackTime';
+import { formatTrackTime, parseTrackTime } from '$lib/trackTime';
 
 export interface CsvTrack {
 	title: string;
@@ -193,17 +193,64 @@ export function parseTracksCsv(
 	for (const record of records.slice(start)) {
 		const url = (urlIdx !== null ? (record[urlIdx] ?? '') : '').trim();
 		const title = (titleIdx !== null ? (record[titleIdx] ?? '') : '').trim();
-		if (title === '' && url === '') continue;
 		const markRaw = (markIdx !== null ? (record[markIdx] ?? '') : '').trim();
 		const parsedMark = parseTrackTime(markRaw);
 		if (markRaw !== '' && !parsedMark.ok) skippedMarks += 1;
+		// Keep time-only rows: a cue can exist before its title is filled in.
+		const hasMark = parsedMark.ok && parsedMark.seconds !== null;
+		if (title === '' && url === '' && !hasMark) continue;
 		tracks.push({
 			title: title.slice(0, 300),
 			artist: (artistIdx !== null ? (record[artistIdx] ?? '') : '').trim().slice(0, 200),
 			album: (albumIdx !== null ? (record[albumIdx] ?? '') : '').trim().slice(0, 200),
 			...(url ? { url: url.slice(0, 500) } : {}),
-			...(parsedMark.ok && parsedMark.seconds !== null ? { markSeconds: parsedMark.seconds } : {})
+			...(hasMark ? { markSeconds: parsedMark.seconds } : {})
 		});
 	}
 	return { tracks, header, skippedMarks };
+}
+
+/** One row to serialise; fields mirror the importer so exports round-trip. */
+export interface TrackCsvRow {
+	position?: number;
+	markSeconds?: number | null;
+	title: string;
+	artist?: string;
+	album?: string;
+	url?: string | null;
+}
+
+function csvCell(value: string): string {
+	return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+/**
+ * Serialise a tracklist for download. Headers use the importer's own aliases
+ * (`time`, `title`, `artist`, `album`, `url`; `#` is ignored on import), so an
+ * exported file re-imports unchanged. BOM + CRLF keep Excel/Numbers happy.
+ */
+export function toTracksCsv(rows: TrackCsvRow[]): string {
+	const lines = ['#,time,title,artist,album,url'];
+	rows.forEach((row, i) => {
+		lines.push(
+			[
+				String(row.position ?? i + 1),
+				formatTrackTime(row.markSeconds ?? null),
+				csvCell(row.title ?? ''),
+				csvCell(row.artist ?? ''),
+				csvCell(row.album ?? ''),
+				csvCell(row.url ?? '')
+			].join(',')
+		);
+	});
+	return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/** `tracklist-<show>-<date>.csv`, e.g. tracklist-version-excursions-vx-28-10-2026.csv */
+export function tracklistCsvFilename(showId: string, date: string): string {
+	const slug = showId
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return `tracklist-${slug}-${date}.csv`;
 }

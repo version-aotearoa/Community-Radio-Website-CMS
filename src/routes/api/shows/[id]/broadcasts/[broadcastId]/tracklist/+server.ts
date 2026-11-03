@@ -59,7 +59,7 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 			url: String(t.url ?? '').trim() || null,
 			markSeconds: isValidMark(t.markSeconds) ? t.markSeconds : null
 		}))
-		.filter((t) => t.title.trim() !== '' || t.url !== null);
+		.filter((t) => t.title.trim() !== '' || t.url !== null || t.markSeconds !== null);
 
 	const tracks = await replaceTracklist(platform!.env.DB, broadcast.id, filtered);
 	return json(tracks);
