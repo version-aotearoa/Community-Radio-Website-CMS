@@ -933,7 +933,6 @@
 	}
 
 	.strip-btn.stamp {
-		margin-left: auto;
 		border-color: var(--vr-line);
 	}
 
@@ -944,7 +943,7 @@
 	}
 
 	.strip-seek {
-		flex: 1;
+		flex: 0 1 220px;
 		min-width: 140px;
 		display: flex;
 	}
