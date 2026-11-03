@@ -23,6 +23,38 @@
 	let menuOpen = $state(false);
 	let buildId = $state<string | null>(null);
 
+	/* Phones held in landscape get a blocking "rotate your device" notice.
+	   Derived from the PHYSICAL screen, never the viewport: on Chrome/Brave/
+	   Firefox for iOS (and Android's keyboard resize) the on-screen keyboard
+	   shrinks the layout viewport, which flips `@media (orientation: landscape)`
+	   while the device is still portrait — that used to cover the whole UI the
+	   moment a text field (chat composer, GIF search) was focused. */
+	let rotateBlocked = $state(false);
+
+	function physicalOrientation(): 'portrait' | 'landscape' {
+		const so = window.screen?.orientation;
+		if (so?.type) return so.type.startsWith('landscape') ? 'landscape' : 'portrait';
+		// Legacy WebKit (iOS < 16.4): 90 / -90 means landscape.
+		if (typeof window.orientation === 'number') {
+			return Math.abs(window.orientation) === 90 ? 'landscape' : 'portrait';
+		}
+		return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+	}
+
+	function updateRotateGate() {
+		if (typeof window === 'undefined') return;
+		const coarse = window.matchMedia('(pointer: coarse)').matches;
+		// Phone-sized screen; the keyboard can't change these dimensions.
+		const phone = Math.min(window.screen.width, window.screen.height) <= 500;
+		const active = document.activeElement;
+		// Never gate while someone is typing: this is exactly the case keyboards
+		// fool the old viewport rule with, and a field in landscape is harmless.
+		const typing =
+			active instanceof HTMLElement &&
+			(active.matches('input, textarea, select') || active.isContentEditable);
+		rotateBlocked = coarse && phone && !typing && physicalOrientation() === 'landscape';
+	}
+
 	// Preview builds show their build id so it is obvious which deploy is live;
 	// production stays clean.
 	function isPreviewHost() {
@@ -109,9 +141,26 @@
 		};
 		window.addEventListener('pageshow', onPageshow);
 
+		updateRotateGate();
+		const coarseQuery = window.matchMedia('(pointer: coarse)');
+		// focusout fires before activeElement moves on — re-check on the next task.
+		const onFocusOut = () => setTimeout(updateRotateGate, 0);
+		window.addEventListener('resize', updateRotateGate);
+		window.addEventListener('orientationchange', updateRotateGate);
+		window.screen.orientation?.addEventListener?.('change', updateRotateGate);
+		coarseQuery.addEventListener('change', updateRotateGate);
+		document.addEventListener('focusin', updateRotateGate);
+		document.addEventListener('focusout', onFocusOut);
+
 		return () => {
 			document.removeEventListener('pointerdown', onDocPointer);
 			window.removeEventListener('pageshow', onPageshow);
+			window.removeEventListener('resize', updateRotateGate);
+			window.removeEventListener('orientationchange', updateRotateGate);
+			window.screen.orientation?.removeEventListener?.('change', updateRotateGate);
+			coarseQuery.removeEventListener('change', updateRotateGate);
+			document.removeEventListener('focusin', updateRotateGate);
+			document.removeEventListener('focusout', onFocusOut);
 		};
 	});
 </script>
@@ -244,7 +293,7 @@
 	</div>
 </WillowDark>
 
-<div class="rotate-notice" role="status" aria-live="polite">
+<div class="rotate-notice" class:show={rotateBlocked} role="status" aria-live="polite">
 	<img class="rotate-logo" src="/version-logo.svg" alt="VERSION" />
 	<p class="rotate-title">Please rotate your device</p>
 	<span class="mono">Version Radio is built for portrait</span>
@@ -595,37 +644,36 @@
 	}
 
 	/* Phones held in landscape — block the UI (manifest orientation only locks
-	   the installed Android PWA; iOS/browser need this). Scoped to coarse
-	   pointers and short viewports so desktop/tablets never see it. */
-	@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
-		.rotate-notice {
-			position: fixed;
-			inset: 0;
-			z-index: 1000;
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			justify-content: center;
-			gap: 0.75rem;
-			padding: 2rem;
-			text-align: center;
-			background: var(--vr-bg-deep);
-			color: var(--vr-text);
-		}
+	   the installed Android PWA; iOS/browser need this). `.show` comes from
+	   updateRotateGate(), which reads the physical screen: the on-screen
+	   keyboard cannot fake landscape the way a CSS orientation query can. */
+	.rotate-notice.show {
+		position: fixed;
+		inset: 0;
+		z-index: 1000;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem;
+		padding: 2rem;
+		text-align: center;
+		background: var(--vr-bg-deep);
+		color: var(--vr-text);
+	}
 
-		.rotate-logo {
-			height: 28px;
-			width: auto;
-			display: block;
-		}
+	.rotate-logo {
+		height: 28px;
+		width: auto;
+		display: block;
+	}
 
-		.rotate-title {
-			margin: 0;
-			font-family: var(--vr-font-headline);
-			font-size: 1.5rem;
-			font-weight: 400;
-			text-transform: uppercase;
-			letter-spacing: 0.01em;
-		}
+	.rotate-title {
+		margin: 0;
+		font-family: var(--vr-font-headline);
+		font-size: 1.5rem;
+		font-weight: 400;
+		text-transform: uppercase;
+		letter-spacing: 0.01em;
 	}
 </style>
