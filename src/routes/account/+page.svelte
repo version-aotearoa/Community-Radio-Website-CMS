@@ -6,6 +6,7 @@
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { artOnError } from '$lib/art';
 	import { formatTrackTime } from '$lib/trackTime';
+	import { displayNameFor, needsDisplayName } from '$lib/displayName';
 	import Seo from '$lib/components/Seo.svelte';
 
 	let { data } = $props();
@@ -63,10 +64,14 @@
 	}
 
 	async function saveName() {
-		nameBusy = true;
 		nameError = '';
 		nameSaved = false;
 		const name = nameInput.trim().slice(0, 50);
+		if (name.includes('@')) {
+			nameError = 'A display name cannot be an email address.';
+			return;
+		}
+		nameBusy = true;
 		const res = await authClient.updateUser({ name });
 		nameBusy = false;
 		if (res.error) {
@@ -210,17 +215,22 @@
 							stroke-linecap="round"
 						/>
 					</svg>
-					<span class="mono initials">{user.name?.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || (user.email?.[0] ?? '?')}</span>
+					<span class="mono initials">{user.name?.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || 'L'}</span>
 				{/if}
 			</div>
 			<div class="identity-copy">
-				<span class="h-sm">{user.name || 'Listener'}</span>
+				<span class="h-sm">{displayNameFor(user)}</span>
 				<span class="mono meta">{user.email}</span>
 				<span class="mono meta">
 					{user.role ?? 'listener'}{#if createdAt} · since {createdAt}{/if}
 				</span>
 			</div>
 		</div>
+		{#if needsDisplayName(user)}
+			<div class="notice ok">
+				Chat shows you as “Listener” until you set a display name.
+			</div>
+		{/if}
 		{#if editingName}
 			<form class="name-form" onsubmit={(e) => { e.preventDefault(); saveName(); }}>
 				<Field label="Display name">
