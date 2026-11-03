@@ -1,5 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { cycleWeekOf, nextDateForWeekday, todayStr } from '$lib/server/shows';
+import { listSavedCues } from '$lib/server/cues';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
@@ -47,6 +48,8 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 		.bind(user.id)
 		.all();
 
+	const savedTracks = await listSavedCues(db, user.id);
+
 	// Air cadence per followed show (station's 4-week cycle), matching the
 	// shows-list cards. Empty for weekly shows.
 	const today = todayStr();
@@ -89,6 +92,7 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 			art: string | null;
 			title: string;
 			image: string | null;
-		}[]
+		}[],
+		savedTracks
 	};
 };

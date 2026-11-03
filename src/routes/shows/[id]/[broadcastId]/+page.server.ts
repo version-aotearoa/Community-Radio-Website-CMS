@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { getShowWithDj, getTracklist, resolveBroadcastForShow } from '$lib/server/shows';
+import { getSavedCueSeconds } from '$lib/server/cues';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, platform }) => {
@@ -11,6 +12,7 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	const tracks = await getTracklist(db, broadcast.id);
 
 	const user = locals.user ?? null;
+	const savedCues = user ? await getSavedCueSeconds(db, user.id, broadcast.id) : [];
 	const canEdit =
 		user !== null && (user.role === 'admin' || (user.role === 'dj' && show.dj_id === user.id));
 	const followed = user
@@ -46,6 +48,7 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 		show,
 		broadcast,
 		tracks,
+		savedCues,
 		followed,
 		savedEpisode,
 		favourited,
