@@ -89,7 +89,7 @@
 	const artFb = $derived(show.image ?? null);
 	const artPreview = $derived(episodeArtOrDefault(broadcast.id, broadcast, { image: show.image }));
 
-	/* ---- Replay preview: play/pause, ±1 min and scrub without leaving the editor ---- */
+	/* ---- Replay preview: play/pause, ±5s / ±1 min and scrub without leaving the editor ---- */
 
 	/** The saved recording link; updated locally when the Replay tab saves one. */
 	let replayUrl = $state('');
@@ -756,12 +756,30 @@
 				−1m
 			</button>
 			<button
+				class="strip-btn"
+				disabled={!replayMine}
+				onclick={() => nudgeReplay(-5)}
+				aria-label="Back 5 seconds"
+				title="Back 5 seconds"
+			>
+				−5s
+			</button>
+			<button
 				class="strip-btn play"
 				class:playing={replayPlaying}
 				onclick={toggleReplayPreview}
 				aria-label={replayPlaying ? 'Pause the replay' : 'Play the replay'}
 			>
 				{replayPlaying ? '❚❚ Pause' : '▶ Replay'}
+			</button>
+			<button
+				class="strip-btn"
+				disabled={!replayMine}
+				onclick={() => nudgeReplay(5)}
+				aria-label="Forward 5 seconds"
+				title="Forward 5 seconds"
+			>
+				+5s
 			</button>
 			<button
 				class="strip-btn"
@@ -837,7 +855,7 @@
 
 	<p class="hint">Click a cell to edit it. Time is where the track starts in this episode's
 		recording (m:ss or h:mm:ss) — listeners click it to jump there. Use the replay strip
-		above to play, skip ±1 min or scrub, select a row, then “Stamp time”. Drag rows to
+		above to play, skip ±5s / ±1 min or scrub, select a row, then “Stamp time”. Drag rows to
 		reorder. Use Ctrl+Z / Ctrl+Y to undo and redo.</p>
 {/if}
 </div>
@@ -924,7 +942,7 @@
 		margin: 0 0 0.5rem;
 	}
 
-	/* Replay preview: play/pause, ±1 min, scrub — so cues can be stamped
+	/* Replay preview: play/pause, ±5s / ±1 min, scrub — so cues can be stamped
 	   without leaving edit mode. */
 	.replay-strip {
 		display: flex;
