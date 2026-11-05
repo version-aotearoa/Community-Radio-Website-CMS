@@ -71,10 +71,33 @@
 		// Fill in name/artist/art for any not-yet-resolved Bandcamp rows.
 		void prefetchMissing();
 
-		// Deep link from a copied/saved cue: start the recording at that point.
+		// Deep link from a copied/saved cue: start the recording at that point
+		// and bring its tracklist row into view.
 		const t = Number(page.url.searchParams.get('t'));
-		if (Number.isFinite(t) && t > 0) startDeepLink(Math.floor(t));
+		if (Number.isFinite(t) && t > 0) {
+			const seconds = Math.floor(t);
+			startDeepLink(seconds);
+			scrollToDeepLinkRow(seconds);
+		}
 	});
+
+	/**
+	 * Bring the shared cue's row into view. Deferred so SvelteKit's own
+	 * navigation scroll reset has run and the tracklist is in the DOM; a link
+	 * whose timestamp matches no row still starts playback, it just doesn't scroll.
+	 */
+	function scrollToDeepLinkRow(seconds: number) {
+		setTimeout(() => {
+			const row = document.querySelector<HTMLElement>(`[data-track-mark="${seconds}"]`);
+			if (!row) return;
+			const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+			row.scrollIntoView({
+				block: 'center',
+				inline: 'nearest',
+				behavior: reduceMotion ? 'auto' : 'smooth'
+			});
+		}, 0);
+	}
 
 	function fmtDate(dateStr: string) {
 		return new Intl.DateTimeFormat('en-NZ', {
@@ -667,6 +690,7 @@
 						class="track-row"
 						class:active={activeMarkId === t.id}
 						aria-current={activeMarkId === t.id ? 'true' : undefined}
+						data-track-mark={t.mark_seconds}
 					>
 						<span class="num">{i + 1}</span>
 						{@render cueCell(t)}
@@ -718,6 +742,7 @@
 						class="track-row"
 						class:active={activeMarkId === t.id}
 						aria-current={activeMarkId === t.id ? 'true' : undefined}
+						data-track-mark={t.mark_seconds}
 					>
 						<span class="num">{i + 1}</span>
 						{@render cueCell(t)}
