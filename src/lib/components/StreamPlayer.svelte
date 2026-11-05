@@ -778,7 +778,7 @@
 					{/if}
 				{:else}
 					{#if media?.show}
-						<a class="showlink mono" href={`/shows/${media.show.id}`}>{media.show.title} <span class="arrow-chip" aria-hidden="true">→︎</span></a>
+						<a class="showlink mono" href={media.href ?? `/shows/${media.show.id}`}>{media.show.title} <span class="arrow-chip" aria-hidden="true">→︎</span></a>
 					{/if}
 				{/if}
 			</div>
