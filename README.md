@@ -158,9 +158,10 @@ copy-link beside its number:
 - **♥** saves that cue — the row's text plus its time — to **My Version → Tracks**
   (`saved_track`, `0029`). Saved cues are keyed on `(broadcast, mark_seconds)`, not
   `track.id`, so saving the tracklist again never orphans them.
-- **⧉** copies `/shows/<show>/<episode>?t=<seconds>`; opening it resumes the
-  recording at that point (`?t` is read on mount and handed to the player's
-  `startAt`, clamped to the recording length).
+- **⧉** copies `/shows/<show>/<episode>?t=<seconds>`; opening it scrolls the
+  matching tracklist row into view and resumes the recording at that point (`?t`
+  is read on mount and handed to the player's `startAt`, clamped to the recording
+  length).
 - When the browser refuses autoplay on a shared link, the page shows a
   **Play from here** prompt (track, time, episode) whose confirm button is the
   user gesture that starts playback at that second (`PlayFromHere.svelte`).
