@@ -22,6 +22,10 @@ export interface ChatMessage {
 	mine?: boolean;
 	/** True for soft-deleted messages (admin moderation view only). */
 	deleted?: boolean;
+	/** Moment in the episode recording, in seconds. */
+	atSeconds?: number | null;
+	/** Root comment when this message is a reply. */
+	parentId?: string | null;
 }
 
 /** A Giphy GIF attached to a chat message (URLs only — no bytes stored). */
@@ -51,6 +55,19 @@ const RATE_LIMIT_MS = 500;
 const MAX_CONTENT_LENGTH = 500;
 const MAX_NAME_LENGTH = 40;
 const MAX_GIF_URL_LENGTH = 2048;
+const MAX_AT_SECONDS = 24 * 60 * 60;
+
+/** Rooms are `main` or an episode key minted by the app. */
+function isValidRoom(room: string): boolean {
+	return room === 'main' || /^episode:[A-Za-z0-9_-]+:\d{4}-\d{2}-\d{2}$/.test(room);
+}
+
+/** Validate a comment's episode position. */
+function parseAt(raw: unknown): number | null {
+	const n = typeof raw === 'number' ? raw : Number(raw);
+	if (!Number.isFinite(n) || n < 0 || n > MAX_AT_SECONDS) return null;
+	return Math.floor(n);
+}
 
 /**
  * Per-room chat: WebSockets + SQLite persistence. One instance per room (named
@@ -151,6 +168,15 @@ export class ChatRoom extends DurableObject<Env> {
 				INSERT INTO _sql_schema_migrations (id) VALUES (7);
 			`);
 		}
+		if (version < 8) {
+			// Episode comments: timestamp in the recording + one-level replies.
+			this.ctx.storage.sql.exec(`
+				ALTER TABLE messages ADD COLUMN at_seconds INTEGER;
+				ALTER TABLE messages ADD COLUMN parent_id TEXT;
+				CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages (parent_id);
+				INSERT INTO _sql_schema_migrations (id) VALUES (8);
+			`);
+		}
 	}
 
 	/** Allocate the next anonymous handle: `Listener N` (per room, sequential). */
@@ -232,15 +258,32 @@ export class ChatRoom extends DurableObject<Env> {
 		const del = url.pathname.match(/^\/api\/messages\/([A-Za-z0-9-]+)$/);
 		if (request.method === 'DELETE' && del) {
 			const id = decodeURIComponent(del[1]);
-			const cursor = this.ctx.storage.sql.exec(
-				'UPDATE messages SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
-				Date.now(),
-				'admin',
-				id
-			);
-			cursor.toArray();
-			const deleted = cursor.rowsWritten;
-			if (deleted > 0) this.broadcast({ type: 'deleted', id });
+			const target = this.ctx.storage.sql
+				.exec<{ parent_id: string | null }>('SELECT parent_id FROM messages WHERE id = ?', id)
+				.toArray()[0];
+			if (!target) return Response.json({ ok: true, deleted: 0 });
+			// Deleting a top-level comment also removes its replies.
+			const ids =
+				target.parent_id === null
+					? this.ctx.storage.sql
+							.exec<{ id: string }>('SELECT id FROM messages WHERE id = ? OR parent_id = ?', id, id)
+							.toArray()
+							.map((r) => String(r.id))
+					: [id];
+			let deleted = 0;
+			for (const rowId of ids) {
+				const cursor = this.ctx.storage.sql.exec(
+					'UPDATE messages SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
+					Date.now(),
+					'admin',
+					rowId
+				);
+				cursor.toArray();
+				if (cursor.rowsWritten > 0) {
+					deleted++;
+					this.broadcast({ type: 'deleted', id: rowId });
+				}
+			}
 			return Response.json({ ok: true, deleted });
 		}
 
@@ -277,7 +320,15 @@ export class ChatRoom extends DurableObject<Env> {
 	}
 
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-		let data: { type?: string; content?: unknown; gif?: unknown; id?: unknown; emoji?: unknown };
+		let data: {
+			type?: string;
+			content?: unknown;
+			gif?: unknown;
+			id?: unknown;
+			emoji?: unknown;
+			at?: unknown;
+			parentId?: unknown;
+		};
 		try {
 			data = JSON.parse(String(message));
 		} catch {
@@ -307,9 +358,28 @@ export class ChatRoom extends DurableObject<Env> {
 			ws.send(JSON.stringify({ type: 'error', message: 'Slow down a little.' }));
 			return;
 		}
+
+		let atSeconds = parseAt(data.at);
+		let parentId: string | null = null;
+		if (typeof data.parentId === 'string' && /^[\w-]{1,64}$/.test(data.parentId)) {
+			const parent = this.ctx.storage.sql
+				.exec<{ id: string; parent_id: string | null; at_seconds: number | null; deleted_at: number | null }>(
+					'SELECT id, parent_id, at_seconds, deleted_at FROM messages WHERE id = ?',
+					data.parentId
+				)
+				.toArray()[0];
+			if (!parent || parent.deleted_at !== null) {
+				ws.send(JSON.stringify({ type: 'error', message: 'That comment is no longer available.' }));
+				return;
+			}
+			// One level only: a reply to a reply attaches to the root.
+			parentId = parent.parent_id ?? parent.id;
+			atSeconds = parent.at_seconds == null ? null : Number(parent.at_seconds);
+		}
+
 		ws.serializeAttachment({ ...meta, lastTs: now });
 
-		const chatMessage = this.insert(meta.name, content, meta.uid, gif, meta.pid);
+		const chatMessage = this.insert(meta.name, content, meta.uid, gif, meta.pid, atSeconds, parentId);
 		this.broadcastMessage(chatMessage, meta);
 	}
 
@@ -357,7 +427,9 @@ export class ChatRoom extends DurableObject<Env> {
 		content: string,
 		userId: string | null,
 		gif: GifMedia | null,
-		pid: string | null
+		pid: string | null,
+		atSeconds: number | null,
+		parentId: string | null
 	): ChatMessage {
 		const msg: ChatMessage = {
 			id: crypto.randomUUID(),
@@ -365,10 +437,12 @@ export class ChatRoom extends DurableObject<Env> {
 			name,
 			content,
 			userId,
-			...(gif ? { gif } : {})
+			...(gif ? { gif } : {}),
+			...(atSeconds === null ? {} : { atSeconds }),
+			...(parentId === null ? {} : { parentId })
 		};
 		this.ctx.storage.sql.exec(
-			'INSERT INTO messages (id, ts, name, content, user_id, pid, gif_url, gif_preview, gif_width, gif_height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+			'INSERT INTO messages (id, ts, name, content, user_id, pid, gif_url, gif_preview, gif_width, gif_height, at_seconds, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 			msg.id,
 			msg.ts,
 			msg.name,
@@ -378,7 +452,9 @@ export class ChatRoom extends DurableObject<Env> {
 			gif?.url ?? null,
 			gif?.preview ?? null,
 			gif?.width ?? null,
-			gif?.height ?? null
+			gif?.height ?? null,
+			atSeconds,
+			parentId
 		);
 		// Keep stored history bounded; delete oldest beyond the cap.
 		this.ctx.storage.sql.exec(
@@ -404,7 +480,7 @@ export class ChatRoom extends DurableObject<Env> {
 	private recent(limit: number, uid: string | null, pid: string | null): ChatMessage[] {
 		const rows = this.ctx.storage.sql
 			.exec<Record<string, string | number | null>>(
-				`SELECT id, ts, name, content, user_id, pid, gif_url, gif_preview, gif_width, gif_height
+				`SELECT id, ts, name, content, user_id, pid, gif_url, gif_preview, gif_width, gif_height, at_seconds, parent_id
 				 FROM messages WHERE deleted_at IS NULL ORDER BY ts DESC LIMIT ?`,
 				limit
 			)
@@ -465,7 +541,7 @@ export class ChatRoom extends DurableObject<Env> {
 			: [];
 		const rows = this.ctx.storage.sql
 			.exec<Record<string, string | number | null>>(
-				`SELECT id, ts, name, content, user_id, deleted_at, gif_url, gif_preview, gif_width, gif_height
+				`SELECT id, ts, name, content, user_id, deleted_at, gif_url, gif_preview, gif_width, gif_height, at_seconds, parent_id
 				 FROM messages ${where}
 				 ORDER BY ts DESC, id DESC
 				 LIMIT ?`,
@@ -491,8 +567,8 @@ export class ChatRoom extends DurableObject<Env> {
 		const id = String(rawId ?? '').slice(0, 64);
 		if (!/^[\w-]{1,64}$/.test(id)) return;
 		const row = this.ctx.storage.sql
-			.exec<{ user_id: string | null; pid: string | null }>(
-				'SELECT user_id, pid FROM messages WHERE id = ?',
+			.exec<{ user_id: string | null; pid: string | null; parent_id: string | null }>(
+				'SELECT user_id, pid, parent_id FROM messages WHERE id = ?',
 				id
 			)
 			.toArray()[0];
@@ -506,14 +582,30 @@ export class ChatRoom extends DurableObject<Env> {
 			ws.send(JSON.stringify({ type: 'error', message: 'You can only delete your own messages.' }));
 			return;
 		}
-		const cursor = this.ctx.storage.sql.exec(
-			'UPDATE messages SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
-			Date.now(),
-			meta.uid ?? meta.pid ?? 'unknown',
-			id
-		);
-		cursor.toArray();
-		if (cursor.rowsWritten > 0) this.broadcast({ type: 'deleted', id });
+
+		// Deleting a top-level comment removes its replies with it.
+		const ids =
+			row.parent_id === null
+				? this.ctx.storage.sql
+						.exec<{ id: string }>('SELECT id FROM messages WHERE id = ? OR parent_id = ?', id, id)
+						.toArray()
+						.map((r) => String(r.id))
+				: [id];
+		let removed = 0;
+		for (const target of ids) {
+			const cursor = this.ctx.storage.sql.exec(
+				'UPDATE messages SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL',
+				Date.now(),
+				meta.uid ?? meta.pid ?? 'unknown',
+				target
+			);
+			cursor.toArray();
+			if (cursor.rowsWritten > 0) {
+				removed++;
+				this.broadcast({ type: 'deleted', id: target });
+			}
+		}
+		if (removed === 0) return;
 	}
 
 	/**
@@ -588,6 +680,7 @@ export default {
 		// Route all requests (WS upgrades + HTTP) to the named room's DO.
 		const url = new URL(request.url);
 		const room = url.searchParams.get('room') || 'main';
+		if (!isValidRoom(room)) return new Response('Invalid room', { status: 400 });
 		return env.CHAT_ROOM.getByName(room).fetch(request);
 	}
 };
@@ -609,7 +702,13 @@ function rowToPublicMessage(row: Record<string, string | number | null>): ChatMe
 		name: String(row.name),
 		content: String(row.content),
 		userId: row.user_id === undefined || row.user_id === null ? null : String(row.user_id),
-		...(gif ? { gif } : {})
+		...(gif ? { gif } : {}),
+		...(row.at_seconds === undefined || row.at_seconds === null
+			? {}
+			: { atSeconds: Number(row.at_seconds) }),
+		...(row.parent_id === undefined || row.parent_id === null
+			? {}
+			: { parentId: String(row.parent_id) })
 	};
 }
 

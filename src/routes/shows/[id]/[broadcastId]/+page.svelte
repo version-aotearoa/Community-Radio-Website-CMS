@@ -8,6 +8,7 @@
 		playback,
 		playbackBlocked,
 		playMedia,
+		playerPosition,
 		requestSeek,
 		requestSetPlaying,
 		startPlayQueue,
@@ -15,6 +16,7 @@
 	} from '$lib/stores/player';
 	import { formatTrackTime } from '$lib/trackTime';
 	import PlayFromHere from '$lib/components/PlayFromHere.svelte';
+	import ChatPanel from '$lib/components/ChatPanel.svelte';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
@@ -39,6 +41,17 @@
 		!!broadcast.replay_url && !$unavailableReplays.has(broadcast.replay_url)
 	);
 	const hasMarks = $derived(tracks.some((t) => t.mark_seconds !== null));
+
+	/**
+	 * Position for a new episode comment: the live replay position when this
+	 * episode is loaded, otherwise the start. Null when there is no replay.
+	 */
+	const chatPosition = $derived.by(() => {
+		const url = broadcast.replay_url;
+		if (!url) return null;
+		const pos = $playerPosition;
+		return pos.url === url ? Math.max(0, Math.floor(pos.seconds)) : 0;
+	});
 
 	/** Row whose cue marker was last clicked — pinned until playback stops. */
 	let activeMarkId = $state<string | null>(null);
@@ -680,6 +693,22 @@
 	{#if broadcast.description}
 		<div class="episode-desc">{@html broadcast.description}</div>
 	{/if}
+	<div class="episode-chat">
+		<h2>Episode comments</h2>
+		{#key data.chatRoom}
+			<ChatPanel
+				room={data.chatRoom}
+				chatUrl={data.chatUrl}
+				siteKey={data.siteKey}
+				giphyKey={data.giphyKey}
+				user={data.user}
+				mode="comments"
+				initialMessages={data.initialMessages}
+				position={chatPosition}
+				onseek={(seconds) => seekReplay(null, seconds)}
+			/>
+		{/key}
+	</div>
 	<h2>Tracklist</h2>
 	{#if tracks.length}
 		<div class="tracklist-scroll">
@@ -1081,6 +1110,14 @@
 		margin: 0 0 1rem;
 		color: var(--vr-muted);
 		line-height: 1.55;
+	}
+
+	.episode-chat {
+		margin: 1.25rem 0 1.5rem;
+	}
+
+	.episode-chat :global(.chat-panel) {
+		max-width: 100%;
 	}
 
 	.episode-desc :global(p) {

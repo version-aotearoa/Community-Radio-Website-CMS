@@ -4,6 +4,8 @@
 	import { page } from '$app/state';
 	import { Button, Field, Text, Combo } from '@svar-ui/svelte-core';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
+	import { episodeRoomKey } from '$lib/chat';
+	import { formatTrackTime } from '$lib/trackTime';
 	import { EVENT_TYPES } from '$lib/eventTypes';
 	import type { ShowRow } from '$lib/server/shows';
 	import type { NewsListItem } from '$lib/server/news';
@@ -125,6 +127,8 @@
 		content: string;
 		userId?: string | null;
 		deleted?: boolean;
+		atSeconds?: number | null;
+		parentId?: string | null;
 	}
 
 	const CHAT_PAGE_SIZE = 100;
@@ -137,6 +141,8 @@
 	let chatHasMore = $state(false);
 	let chatCursor = $state<{ ts: number; id: string } | null>(null);
 	let chatLoadingMore = $state(false);
+	let chatRoom = $state('main');
+	const recentEpisodes = $derived(data.recentEpisodes ?? []);
 	let purgeName = $state('');
 	let adminError = $state('');
 
@@ -583,7 +589,11 @@
 	}
 
 	async function loadChat() {
-		const res = await fetch(`/api/admin/chat?limit=${CHAT_PAGE_SIZE}`);
+		const params = new URLSearchParams({
+			limit: String(CHAT_PAGE_SIZE),
+			room: chatRoom
+		});
+		const res = await fetch(`/api/admin/chat?${params.toString()}`);
 		if (res.ok) {
 			const data = (await res.json()) as ChatPage;
 			chatMessages = data.messages;
@@ -593,6 +603,15 @@
 		}
 	}
 
+	function selectChatRoom(room: string) {
+		chatRoom = room;
+		chatLoaded = false;
+		chatMessages = [];
+		chatCursor = null;
+		chatHasMore = false;
+		void loadChat();
+	}
+
 	async function loadMoreChat() {
 		if (!chatCursor || chatLoadingMore) return;
 		chatLoadingMore = true;
@@ -600,7 +619,8 @@
 			const params = new URLSearchParams({
 				limit: String(CHAT_PAGE_SIZE),
 				beforeTs: String(chatCursor.ts),
-				beforeId: chatCursor.id
+				beforeId: chatCursor.id,
+				room: chatRoom
 			});
 			const res = await fetch(`/api/admin/chat?${params.toString()}`);
 			if (!res.ok) return;
@@ -725,18 +745,22 @@
 	}
 
 	async function deleteMessage(id: string) {
-		const res = await fetch(`/api/admin/chat/messages/${id}`, { method: 'DELETE' });
+		const res = await fetch(
+			`/api/admin/chat/messages/${id}?room=${encodeURIComponent(chatRoom)}`,
+			{ method: 'DELETE' }
+		);
 		if (res.ok) {
 			// Soft delete: keep the row in the moderation trail, flagged.
-			const msg = chatMessages.find((m) => m.id === id);
-			if (msg) msg.deleted = true;
+			for (const msg of chatMessages) {
+				if (msg.id === id || msg.parentId === id) msg.deleted = true;
+			}
 		}
 	}
 
 	async function purgeChatByName() {
 		const name = purgeName.trim();
 		if (!name) return;
-		const res = await fetch('/api/admin/chat/purge', {
+		const res = await fetch(`/api/admin/chat/purge?room=${encodeURIComponent(chatRoom)}`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ name })
@@ -748,7 +772,7 @@
 	}
 
 	async function purgeChatByUser(userId: string) {
-		const res = await fetch('/api/admin/chat/purge', {
+		const res = await fetch(`/api/admin/chat/purge?room=${encodeURIComponent(chatRoom)}`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ userId })
@@ -1619,6 +1643,24 @@
 {#if isAdmin && activeTab === 'chat'}
 	<section class="card">
 		<h2>Admin — chat moderation</h2>
+		<div class="purge-row">
+			<label class="room-label" for="chat-room">
+				<span class="meta">Room</span>
+				<select
+					id="chat-room"
+					class="dj-select"
+					value={chatRoom}
+					onchange={(e) => selectChatRoom(e.currentTarget.value)}
+				>
+					<option value="main">Main chat</option>
+					{#each recentEpisodes as ep (ep.id)}
+						<option value={episodeRoomKey(ep.show_id, ep.date)}>
+							{ep.title} — {ep.date}
+						</option>
+					{/each}
+				</select>
+			</label>
+		</div>
 		<form class="purge-row" onsubmit={(e) => { e.preventDefault(); purgeChatByName(); }}>
 			<Text bind:value={purgeName} placeholder="Name to purge (e.g. Troublemaker)" css="vr-input" />
 			<Button css="vr-cta ghost" onclick={purgeChatByName}>Purge by name</Button>
@@ -1634,6 +1676,12 @@
 						<div class="user-main">
 							<span class="chat-line">
 								<strong>{m.name}</strong> <em class="chat-time">{fmtChatTime(m.ts)}</em>
+								{#if m.parentId}
+									<em class="chat-time">· reply</em>
+								{/if}
+								{#if m.atSeconds !== null && m.atSeconds !== undefined}
+									<em class="chat-time">· {formatTrackTime(m.atSeconds)}</em>
+								{/if}
 								{#if m.userId}
 									<em class="chat-time">· {emailById.get(m.userId) ?? 'account'}</em>
 								{/if}
@@ -2040,6 +2088,17 @@
 		gap: 0.75rem;
 		margin-bottom: 1rem;
 		flex-wrap: wrap;
+	}
+
+	.room-label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.room-label select {
+		min-width: 14rem;
+		max-width: 100%;
 	}
 
 	.news-head {

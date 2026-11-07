@@ -40,6 +40,15 @@ also coerces any inbound name containing `@` and rewrites stored ones
 (`ChatRoom` migration 7). Accounts without a name are nudged to set one from the
 chat composer, the login page and My Version → Profile.
 
+**Episode comments.** Each episode has its own chat room
+(`episode:<show>:<date>`, keyed on stable show/date rather than the mutable
+episode slug). The episode page embeds the conversation above its tracklist.
+Comments carry `at_seconds` — the replay position when posted — and clicking a
+comment's time seeks/starts the recording there. Replies are one level deep and
+inherit the parent's timestamp. Public history is readable before Turnstile
+verification; verifying only gates posting and live updates. Studio → Chat
+selects the main room or a recent episode room for moderation.
+
 ## AzuraCast (streaming backend)
 
 AzuraCast is an **external, self-hosted dependency** (not run by the app). Instance: `https://stream.version.nz` — station id `1`, shortcode `version_radio`, configured in `src/lib/azuracast.ts` (the public endpoints used need **no API key**). It provides the 24/7 live HLS stream (AutoDJ re-air + live DJ input), now-playing/live metadata, on-demand replays, and artwork.
