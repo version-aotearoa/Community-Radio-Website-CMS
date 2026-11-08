@@ -16,7 +16,10 @@
 		mode = 'chat',
 		initialMessages = [],
 		position = null,
-		onseek = null
+		onseek = null,
+		onMessages = null,
+		onPosted = null,
+		focusNonce = 0
 	}: {
 		room: string;
 		chatUrl: string;
@@ -28,6 +31,9 @@
 		/** Current replay position for the composer, when this is an episode. */
 		position?: number | null;
 		onseek?: ((seconds: number) => void) | null;
+		onMessages?: ((messages: ChatMessage[]) => void) | null;
+		onPosted?: (() => void) | null;
+		focusNonce?: number;
 	} = $props();
 
 	// Keep no more than the worker's history window (HISTORY_LIMIT = 299 + the
@@ -95,6 +101,8 @@
 	// Name assigned by the worker for this session (Listener N or account name).
 	let assignedName = $state('');
 	let replyTo = $state<ChatMessage | null>(null);
+	let composerEl: HTMLFormElement | undefined = $state();
+	let lastFocusNonce = 0;
 
 	const displayName = $derived(
 		user ? displayNameFor(user) : assignedName || handle || 'Listener'
@@ -131,6 +139,18 @@
 		// Comments are read in timeline order; only the live chat pins to the newest.
 		if (!isComments && scrollEl && messages.length) {
 			scrollEl.scrollTop = scrollEl.scrollHeight;
+		}
+	});
+
+	$effect(() => {
+		onMessages?.(messages);
+	});
+
+	$effect(() => {
+		if (focusNonce > lastFocusNonce) {
+			lastFocusNonce = focusNonce;
+			composerEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			composerEl?.querySelector('input')?.focus();
 		}
 	});
 
@@ -319,9 +339,11 @@
 	function send() {
 		const content = input.trim();
 		if (!content) return;
+		const wasReply = !!replyTo;
 		if (!sendFrame(content)) return;
 		input = '';
 		replyTo = null;
+		if (isComments && !wasReply) onPosted?.();
 	}
 
 	function deleteMessage(msg: ChatMessage) {
@@ -333,11 +355,13 @@
 
 	function onPickGif(gif: GifMedia) {
 		gifPickerOpen = false;
+		const wasReply = !!replyTo;
 		if (!sendFrame('', gif)) {
 			error = 'Still reconnecting — try the GIF again in a moment.';
 			return;
 		}
 		replyTo = null;
+		if (isComments && !wasReply) onPosted?.();
 	}
 
 	function saveHandle() {
@@ -419,6 +443,7 @@
 
 			<form
 				class="composer"
+				bind:this={composerEl}
 				onsubmit={(e) => {
 					e.preventDefault();
 					send();
@@ -453,7 +478,7 @@
 					css="vr-input chat-input"
 				/>
 				<button class="send" type="submit" disabled={!connected}>
-					{isComments ? 'Post' : 'Send'}
+					{isComments ? 'Comment' : 'Send'}
 				</button>
 			</form>
 			{#if gifPickerOpen && giphyKey}
