@@ -1051,8 +1051,8 @@
 			display: grid;
 			grid-template-columns: auto minmax(0, 1fr) auto;
 			grid-template-areas:
-				'input input send'
-				'gif . at';
+				'input input input'
+				'gif at send';
 			align-items: center;
 			column-gap: 0.5rem;
 			row-gap: 0.35rem;
