@@ -103,8 +103,6 @@
 	let replyTo = $state<ChatMessage | null>(null);
 	let composerEl: HTMLFormElement | undefined = $state();
 	let lastFocusNonce = 0;
-	let viewportCleanup: (() => void) | null = null;
-	let composerScrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const displayName = $derived(
 		user ? displayNameFor(user) : assignedName || handle || 'Listener'
@@ -151,54 +149,11 @@
 	$effect(() => {
 		if (focusNonce > lastFocusNonce) {
 			lastFocusNonce = focusNonce;
-			composerEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			// Let the browser do its native focus scroll; programmatic scrolling
+			// here fights the mobile keyboard and can leave the input hidden.
 			composerEl?.querySelector('input')?.focus();
 		}
 	});
-
-	function mobileComposer(): boolean {
-		return typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches;
-	}
-
-	/** Mobile keyboard: scroll all the way down so the composer clears it. */
-	function scrollComposerToMax() {
-		if (!mobileComposer() || !composerEl) return;
-		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-		window.scrollTo({
-			top: document.documentElement.scrollHeight,
-			behavior: reduceMotion ? 'auto' : 'smooth'
-		});
-	}
-
-	function onComposerFocusIn(e: FocusEvent) {
-		const target = e.target as HTMLElement;
-		if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') return;
-		if (!mobileComposer()) return;
-
-		viewportCleanup?.();
-		if (composerScrollTimer) clearTimeout(composerScrollTimer);
-		scrollComposerToMax();
-		// Keyboard opening changes the visual viewport after focus; run again once
-		// it has settled so the scroll reaches the true bottom.
-		composerScrollTimer = setTimeout(scrollComposerToMax, 250);
-
-		const viewport = window.visualViewport;
-		if (viewport) {
-			const onResize = () => scrollComposerToMax();
-			viewport.addEventListener('resize', onResize);
-			viewportCleanup = () => viewport.removeEventListener('resize', onResize);
-		}
-	}
-
-	function onComposerFocusOut(e: FocusEvent) {
-		if (composerEl?.contains(e.relatedTarget as Node | null)) return;
-		viewportCleanup?.();
-		viewportCleanup = null;
-		if (composerScrollTimer) {
-			clearTimeout(composerScrollTimer);
-			composerScrollTimer = null;
-		}
-	}
 
 	$effect(() => {
 		// Connect once a Turnstile token is available.
@@ -365,8 +320,6 @@
 	onDestroy(() => {
 		closed = true;
 		ws?.close();
-		viewportCleanup?.();
-		if (composerScrollTimer) clearTimeout(composerScrollTimer);
 	});
 
 	function sendFrame(content: string, gif?: GifMedia): boolean {
@@ -492,8 +445,6 @@
 			<form
 				class="composer"
 				bind:this={composerEl}
-				onfocusin={onComposerFocusIn}
-				onfocusout={onComposerFocusOut}
 				onsubmit={(e) => {
 					e.preventDefault();
 					send();
