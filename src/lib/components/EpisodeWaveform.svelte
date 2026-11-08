@@ -81,7 +81,18 @@
 	);
 
 	let hoveredMarkerId = $state<string | null>(null);
-	const hoveredMarker = $derived(markers.find((m) => m.id === hoveredMarkerId) ?? null);
+	let pinnedMarkerId = $state<string | null>(null);
+	const activeMarkerId = $derived(pinnedMarkerId ?? hoveredMarkerId);
+	const activeMarker = $derived(markers.find((m) => m.id === activeMarkerId) ?? null);
+
+	function toggleMarker(id: string) {
+		if (pinnedMarkerId === id) {
+			pinnedMarkerId = null;
+			hoveredMarkerId = null;
+		} else {
+			pinnedMarkerId = id;
+		}
+	}
 
 	function markerTipClass(at: number): string {
 		if (!total) return '';
@@ -127,6 +138,7 @@
 	}
 
 	function onPointerDown(e: PointerEvent) {
+		pinnedMarkerId = null;
 		if (!active) return;
 		const el = e.currentTarget as HTMLElement;
 		scrubbing = true;
@@ -148,6 +160,12 @@
 	}
 
 	function onKeyDown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			pinnedMarkerId = null;
+			hoveredMarkerId = null;
+			e.preventDefault();
+			return;
+		}
 		if (!active || !total) return;
 		const step = e.shiftKey ? 30 : 5;
 		let next = shown;
@@ -157,6 +175,7 @@
 		else if (e.key === 'End') next = total;
 		else return;
 		e.preventDefault();
+		pinnedMarkerId = null;
 		onSeek(Math.max(0, Math.min(total, next)));
 	}
 
@@ -214,8 +233,10 @@
 					type="button"
 					class="pin"
 					style={pinStyle(marker.at)}
-					aria-label={`Jump to comment by ${marker.name} at ${formatTrackTime(marker.at)}`}
-					aria-describedby={hoveredMarkerId === marker.id ? 'wave-tip' : undefined}
+					aria-label={`Show comment by ${marker.name} at ${formatTrackTime(marker.at)}`}
+					aria-expanded={pinnedMarkerId === marker.id}
+					aria-controls="wave-tip"
+					aria-describedby={activeMarkerId === marker.id ? 'wave-tip' : undefined}
 					onpointerdown={(e) => e.stopPropagation()}
 					onpointerenter={() => (hoveredMarkerId = marker.id)}
 					onpointerleave={() => (hoveredMarkerId = null)}
@@ -223,19 +244,19 @@
 					onblur={() => (hoveredMarkerId = null)}
 					onclick={(e) => {
 						e.stopPropagation();
-						onSeek(marker.at);
+						toggleMarker(marker.id);
 					}}
 				></button>
 			{/each}
-			{#if hoveredMarker}
+			{#if activeMarker}
 				<div
 					id="wave-tip"
-					class="marker-tip {markerTipClass(hoveredMarker.at)}"
-					style={markerTipStyle(hoveredMarker.at)}
+					class="marker-tip {markerTipClass(activeMarker.at)}"
+					style={markerTipStyle(activeMarker.at)}
 					role="tooltip"
 				>
-					<span class="tip-meta mono">{hoveredMarker.name} · {formatTrackTime(hoveredMarker.at)}</span>
-					<span class="tip-body">{hoveredMarker.content || 'GIF comment'}</span>
+					<span class="tip-meta mono">{activeMarker.name} · {formatTrackTime(activeMarker.at)}</span>
+					<span class="tip-body">{activeMarker.content || 'GIF comment'}</span>
 				</div>
 			{/if}
 		</div>
