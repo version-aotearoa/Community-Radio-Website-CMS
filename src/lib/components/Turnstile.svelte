@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 
 	let {
 		siteKey,
@@ -15,12 +15,13 @@
 
 	let container: HTMLDivElement | undefined = $state();
 	let widgetId: number | undefined;
+	let destroyed = false;
 
 	const instanceId = Math.random().toString(36).slice(2);
 	const globalName = `onVrTurnstileLoad${instanceId}`;
 
 	function render() {
-		if (!container || !window.turnstile) return;
+		if (destroyed || !container || !window.turnstile) return;
 		widgetId = window.turnstile.render(container, {
 			sitekey: siteKey,
 			action,
@@ -44,6 +45,18 @@
 		return () => {
 			delete (window as unknown as Record<string, unknown>)[globalName];
 		};
+	});
+
+	onDestroy(() => {
+		destroyed = true;
+		if (widgetId !== undefined && window.turnstile) {
+			try {
+				window.turnstile.remove(widgetId);
+			} catch {
+				// Widget already gone; nothing to clean up.
+			}
+			widgetId = undefined;
+		}
 	});
 </script>
 
