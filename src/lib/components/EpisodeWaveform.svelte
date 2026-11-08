@@ -80,6 +80,25 @@
 			}))
 	);
 
+	let hoveredMarkerId = $state<string | null>(null);
+	const hoveredMarker = $derived(markers.find((m) => m.id === hoveredMarkerId) ?? null);
+
+	function markerTipClass(at: number): string {
+		if (!total) return '';
+		const pct = (at / total) * 100;
+		if (pct < 22) return 'tip-left';
+		if (pct > 78) return 'tip-right';
+		return '';
+	}
+
+	function markerTipStyle(at: number): string {
+		if (!total) return 'display:none';
+		const pct = Math.max(0, Math.min(100, (at / total) * 100));
+		if (pct < 22) return 'left:0';
+		if (pct > 78) return 'left:auto;right:0';
+		return `left:${pct}%`;
+	}
+
 	// Probe duration without starting playback when the player has never loaded
 	// this recording. The global player's duration wins once it knows better.
 	$effect(() => {
@@ -195,15 +214,30 @@
 					type="button"
 					class="pin"
 					style={pinStyle(marker.at)}
-					title={`${marker.name}: ${formatTrackTime(marker.at)}${marker.content ? ` — ${marker.content}` : ''}`}
 					aria-label={`Jump to comment by ${marker.name} at ${formatTrackTime(marker.at)}`}
+					aria-describedby={hoveredMarkerId === marker.id ? 'wave-tip' : undefined}
 					onpointerdown={(e) => e.stopPropagation()}
+					onpointerenter={() => (hoveredMarkerId = marker.id)}
+					onpointerleave={() => (hoveredMarkerId = null)}
+					onfocus={() => (hoveredMarkerId = marker.id)}
+					onblur={() => (hoveredMarkerId = null)}
 					onclick={(e) => {
 						e.stopPropagation();
 						onSeek(marker.at);
 					}}
 				></button>
 			{/each}
+			{#if hoveredMarker}
+				<div
+					id="wave-tip"
+					class="marker-tip {markerTipClass(hoveredMarker.at)}"
+					style={markerTipStyle(hoveredMarker.at)}
+					role="tooltip"
+				>
+					<span class="tip-meta mono">{hoveredMarker.name} · {formatTrackTime(hoveredMarker.at)}</span>
+					<span class="tip-body">{hoveredMarker.content || 'GIF comment'}</span>
+				</div>
+			{/if}
 		</div>
 		<div class="wave-times mono">
 			<span>{formatTrackTime(shown)}</span>
@@ -345,6 +379,74 @@
 	.pin:hover::after,
 	.pin:focus-visible::after {
 		background: var(--vr-bg);
+	}
+
+	.marker-tip {
+		position: absolute;
+		bottom: calc(100% + 8px);
+		z-index: 5;
+		width: max-content;
+		max-width: min(18rem, 80vw);
+		border: 1px solid var(--vr-line);
+		background: var(--vr-surface);
+		color: var(--vr-text);
+		padding: 0.45rem 0.55rem;
+		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+		transform: translateX(-50%);
+		pointer-events: none;
+	}
+
+	.marker-tip.tip-left {
+		transform: none;
+	}
+
+	.marker-tip.tip-right {
+		transform: none;
+	}
+
+	.marker-tip::after {
+		content: '';
+		position: absolute;
+		left: 50%;
+		top: 100%;
+		width: 9px;
+		height: 9px;
+		margin-left: -5px;
+		margin-top: -5px;
+		transform: rotate(45deg);
+		background: var(--vr-surface);
+		border-right: 1px solid var(--vr-line);
+		border-bottom: 1px solid var(--vr-line);
+	}
+
+	.marker-tip.tip-left::after {
+		left: 0.75rem;
+	}
+
+	.marker-tip.tip-right::after {
+		left: auto;
+		right: 0.75rem;
+		margin-left: 0;
+	}
+
+	.tip-meta {
+		display: block;
+		color: var(--vr-muted);
+		font-size: 0.66rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		margin-bottom: 0.2rem;
+	}
+
+	.tip-body {
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		font-size: 0.82rem;
+		line-height: 1.35;
+		overflow-wrap: anywhere;
 	}
 
 	.wave-times {
