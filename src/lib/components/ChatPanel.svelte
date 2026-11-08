@@ -463,20 +463,22 @@
 						<span class="gif-btn-label">GIF</span>
 					</button>
 				{/if}
-				{#if isComments}
+				<div class="composer-input">
+					<Text
+						bind:value={input}
+						placeholder={isComments
+							? replyTo
+								? `Reply to ${replyTo.name}…`
+								: 'Add a comment…'
+							: 'Say something…'}
+						css="vr-input chat-input"
+					/>
+				</div>
+				{#if isComments && !replyTo}
 					<span class="comment-at mono" class:muted={position === null}>
 						{position === null ? 'No timestamp' : `at ${formatTrackTime(position)}`}
 					</span>
 				{/if}
-				<Text
-					bind:value={input}
-					placeholder={isComments
-						? replyTo
-							? `Reply to ${replyTo.name}…`
-							: 'Add a comment…'
-						: 'Say something…'}
-					css="vr-input chat-input"
-				/>
 				<button class="send" type="submit" disabled={!connected}>
 					{isComments ? 'Comment' : 'Send'}
 				</button>
@@ -868,6 +870,12 @@
 		border-top: 1px solid var(--vr-line);
 	}
 
+	.composer-input {
+		display: flex;
+		flex: 1;
+		min-width: 0;
+	}
+
 	.comment-at {
 		font-size: 0.7rem;
 		color: var(--vr-text);
@@ -937,6 +945,7 @@
 
 	:global(.chat-input) {
 		flex: 1;
+		min-width: 0;
 	}
 
 	.send {
@@ -1039,11 +1048,34 @@
 		}
 
 		.composer {
-			flex-wrap: wrap;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			grid-template-areas:
+				'input input send'
+				'gif . at';
+			align-items: center;
+			column-gap: 0.5rem;
+			row-gap: 0.35rem;
+		}
+
+		.composer-input {
+			grid-area: input;
+		}
+
+		.composer .send {
+			grid-area: send;
+			min-height: 40px;
+		}
+
+		.composer .gif-btn {
+			grid-area: gif;
+			justify-self: start;
+			min-height: 40px;
 		}
 
 		.comment-at {
-			order: -1;
+			grid-area: at;
+			justify-self: end;
 		}
 	}
 </style>
