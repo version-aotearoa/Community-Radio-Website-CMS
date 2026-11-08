@@ -50,18 +50,22 @@
 		return bars;
 	}
 
-	const bars = $derived(makeBars(seed, BAR_COUNT));
-
 	let probedDuration = $state<number | null>(null);
+	let realPeaks = $state<number[] | null>(null);
+	let realDuration = $state<number | null>(null);
 	let scrub = $state<number | null>(null);
 	let scrubbing = $state(false);
+
+	const bars = $derived(realPeaks && realPeaks.length > 0 ? realPeaks : makeBars(seed, BAR_COUNT));
 
 	const total = $derived(
 		duration && Number.isFinite(duration) && duration > 0
 			? duration
-			: probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
-				? probedDuration
-				: null
+			: realDuration && Number.isFinite(realDuration) && realDuration > 0
+				? realDuration
+				: probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
+					? probedDuration
+					: null
 	);
 	const shown = $derived(
 		Math.max(0, Math.min(total ?? Number.MAX_SAFE_INTEGER, scrub ?? currentTime))
@@ -128,6 +132,38 @@
 			audio.removeAttribute('src');
 			audio.load();
 		};
+	});
+
+	// Real peaks from AzuraCast (downsampled server-side). Until they arrive —
+	// or if the station can't generate a waveform — the decorative bars remain.
+	$effect(() => {
+		const url = replayUrl;
+		realPeaks = null;
+		realDuration = null;
+		if (!url) return;
+		const controller = new AbortController();
+		void (async () => {
+			try {
+				const res = await fetch(`/api/replay-waveform?url=${encodeURIComponent(url)}`, {
+					signal: controller.signal
+				});
+				if (!res.ok) return;
+				const body = (await res.json()) as { peaks?: unknown; duration?: unknown };
+				if (Array.isArray(body.peaks)) {
+					const peaks = body.peaks
+						.map(Number)
+						.filter((n) => Number.isFinite(n))
+						.map((n) => Math.max(0, Math.min(1, n)));
+					if (peaks.length > 1) realPeaks = peaks;
+				}
+				if (typeof body.duration === 'number' && Number.isFinite(body.duration) && body.duration > 0) {
+					realDuration = body.duration;
+				}
+			} catch {
+				// decorative fallback
+			}
+		})();
+		return () => controller.abort();
 	});
 
 	function secondsAt(clientX: number, el: HTMLElement): number {

@@ -45,6 +45,8 @@ declare global {
 	// Secrets / vars not derived from wrangler bindings.
 	interface CloudflareBindings {
 		AUTH_SECRET: string;
+		/** Server-only AzuraCast API key (station media access, used for waveforms). */
+		AZURACAST_API_KEY?: string;
 		CHAT_ADMIN_TOKEN?: string;
 		CHAT_IDENTITY_SECRET?: string;
 		GITHUB_ID?: string;

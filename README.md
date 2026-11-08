@@ -47,7 +47,9 @@ Comments carry `at_seconds` — the replay position when posted — and clicking
 comment's time seeks/starts the recording there. Replies are one level deep and
 inherit the parent's timestamp. A clickable waveform above the tracklist shows
 comment pins and seeks on click/drag; hovering or tapping a pin opens its
-comment without moving playback. **Comment** posts at the current or pinned
+comment without moving playback. With `AZURACAST_API_KEY` set, the waveform uses
+real AzuraCast peaks (downsampled and cached server-side); otherwise it falls
+back to a stable decorative waveform. **Comment** posts at the current or pinned
 moment. Comments sit below the tracklist. Public history is readable before
 Turnstile verification; verifying only gates posting and live updates. Studio →
 Chat selects the main room or a recent episode room for moderation.
