@@ -129,6 +129,9 @@
 			.sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
 	}
 
+	/** Parent lookup for inline reply quotes in the live chat. */
+	const byId = $derived.by(() => new Map(messages.map((m) => [m.id, m])));
+
 	const roots = $derived.by(() => {
 		if (!isComments) return sortMessages(messages);
 		const ids = new Set(messages.map((m) => m.id));
@@ -326,12 +329,10 @@
 		if (!ws || ws.readyState !== WebSocket.OPEN) return false;
 		const frame: Record<string, unknown> = { type: 'message', content };
 		if (gif) frame.gif = gif;
-		if (isComments) {
-			if (replyTo) {
-				frame.parentId = replyTo.id;
-			} else if (position !== null && Number.isFinite(position)) {
-				frame.at = Math.max(0, Math.floor(position));
-			}
+		if (replyTo) {
+			frame.parentId = replyTo.id;
+		} else if (isComments && position !== null && Number.isFinite(position)) {
+			frame.at = Math.max(0, Math.floor(position));
 		}
 		ws.send(JSON.stringify(frame));
 		return true;
@@ -433,7 +434,7 @@
 				</a>
 			{/if}
 
-			{#if isComments && replyTo}
+			{#if replyTo}
 				<div class="reply-context">
 					<span>Replying to <strong>{replyTo.name}</strong></span>
 					<button type="button" class="reply-cancel" onclick={() => (replyTo = null)}>
@@ -467,11 +468,11 @@
 				<div class="composer-input">
 					<Text
 						bind:value={input}
-						placeholder={isComments
-							? replyTo
-								? `Reply to ${replyTo.name}…`
-								: 'Add a comment…'
-							: 'Say something…'}
+						placeholder={replyTo
+							? `Reply to ${replyTo.name}…`
+							: isComments
+								? 'Add a comment…'
+								: 'Say something…'}
 						css="vr-input chat-input"
 					/>
 				</div>
@@ -574,7 +575,7 @@
 				</svg>
 				{#if heartCount(msg) > 0}<span>{heartCount(msg)}</span>{/if}
 			</button>
-			{#if isComments && !isReply}
+			{#if isComments ? !isReply : !msg.parentId}
 				<button class="reply-btn" onclick={() => (replyTo = msg)}>Reply</button>
 			{/if}
 			{#if msg.mine}
@@ -596,6 +597,18 @@
 				</button>
 			{/if}
 		</div>
+		{#if !isComments && msg.parentId}
+			{@const parent = byId.get(msg.parentId)}
+			<p class="msg-quote">
+				<span class="quote-mark" aria-hidden="true">↪</span>
+				{#if parent}
+					<span class="quote-name">{parent.name}</span>
+					<span class="quote-text">{parent.content || (parent.gif ? 'GIF' : '')}</span>
+				{:else}
+					<span class="quote-text">an earlier message</span>
+				{/if}
+			</p>
+		{/if}
 		{#if msg.gif}
 			<img
 				class="msg-gif"
@@ -745,6 +758,42 @@
 		background: var(--vr-text);
 		color: var(--vr-black);
 		border-color: var(--vr-text);
+	}
+
+	.msg-quote {
+		display: flex;
+		align-items: baseline;
+		gap: 0.3rem;
+		margin: 0;
+		padding-left: 0.45rem;
+		border-left: 2px solid var(--vr-line);
+		color: var(--vr-muted);
+		font-size: 0.72rem;
+		min-width: 0;
+		max-width: 100%;
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	.quote-mark {
+		color: var(--vr-faint);
+		flex-shrink: 0;
+	}
+
+	.quote-name {
+		color: var(--vr-text);
+		font-family: var(--vr-font-mono);
+		font-weight: 600;
+		flex-shrink: 0;
+		max-width: 40%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.quote-text {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.reply-btn {
