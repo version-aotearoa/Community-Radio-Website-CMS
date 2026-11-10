@@ -23,7 +23,7 @@ See [ROADMAP.md](ROADMAP.md) for planned features (push notifications).
 - `workers/chat-worker/` — separate Worker owning the `ChatRoom` Durable Object (WebSockets + DO SQLite). SvelteKit does not export DO classes (adapter limitation), so the chat worker is deployed independently and the app connects to it via `PUBLIC_CHAT_URL`.
 - `migrations/` — D1 migrations (domain + auth tables).
 - [`docs/shows-schedule.md`](docs/shows-schedule.md) — shows/broadcasts data model + recurrence/4-week-cycle math.
-- Live stream, now-playing, replays and artwork come from the self-hosted **AzuraCast** backend (`stream.version.nz`) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend).
+- Live stream, now-playing, replays and artwork come from the self-hosted **AzuraCast** backend (`stream.versionradio.live`) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend).
 
 ## Accounts and chat identity
 
@@ -48,15 +48,17 @@ comment's time seeks/starts the recording there. Replies are one level deep and
 inherit the parent's timestamp. A clickable waveform above the tracklist shows
 comment pins and seeks on click/drag; hovering or tapping a pin opens its
 comment without moving playback. With `AZURACAST_API_KEY` set, the waveform uses
-real AzuraCast peaks (downsampled and cached server-side); otherwise it falls
-back to a stable decorative waveform. **Comment** posts at the current or pinned
+real AzuraCast peaks (downsampled and cached server-side); otherwise — or when
+AzuraCast cannot decode the recording (its generator handles MP3/Ogg/FLAC/WAV,
+not the MP4/AAC container, so older `.m4a` recordings fail) — it falls back to a
+stable decorative waveform, marked **approx.** in the header. **Comment** posts at the current or pinned
 moment. Comments sit below the tracklist. Public history is readable before
 Turnstile verification; verifying only gates posting and live updates. Studio →
 Chat selects the main room or a recent episode room for moderation.
 
 ## AzuraCast (streaming backend)
 
-AzuraCast is an **external, self-hosted dependency** (not run by the app). Instance: `https://stream.version.nz` — station id `1`, shortcode `version_radio`, configured in `src/lib/azuracast.ts` (the public endpoints used need **no API key**). It provides the 24/7 live HLS stream (AutoDJ re-air + live DJ input), now-playing/live metadata, on-demand replays, and artwork.
+AzuraCast is an **external, self-hosted dependency** (not run by the app). Instance: `https://stream.versionradio.live` — station id `1`, shortcode `version_radio`, configured in `src/lib/azuracast.ts` (the public endpoints used need **no API key**). It provides the 24/7 live HLS stream (AutoDJ re-air + live DJ input), now-playing/live metadata, on-demand replays, and artwork. The old `stream.version.nz` host was retired in the server move; stored artwork URLs from it are rewritten in `normalizeAzuraCastArtUrl()`.
 
 **API / stream data used**
 
