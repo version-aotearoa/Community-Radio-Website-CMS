@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-SvelteKit (Svelte 5) PWA on Cloudflare Pages (Workers). Stream served via AzuraCast HLS (`stream.version.nz`).
+SvelteKit (Svelte 5) PWA on Cloudflare Pages (Workers). Stream served via self-hosted AzuraCast HLS (this deployment: `stream.versionradio.live`; point `src/lib/azuracast.ts` at your own instance to fork).
 
 ## Users
 

@@ -53,18 +53,24 @@
 	let probedDuration = $state<number | null>(null);
 	let realPeaks = $state<number[] | null>(null);
 	let realDuration = $state<number | null>(null);
+	/** 'estimated' means the bars are decorative — no usable upstream peaks. */
+	let waveformStatus = $state<'pending' | 'real' | 'estimated'>('pending');
+	let waveformReason = $state('');
 	let scrub = $state<number | null>(null);
 	let scrubbing = $state(false);
 
 	const bars = $derived(realPeaks && realPeaks.length > 0 ? realPeaks : makeBars(seed, BAR_COUNT));
 
+	// The player's own duration is authoritative, then the exact <audio> metadata
+	// probe. The waveform's derived duration is the last resort: it is a
+	// calculation over a decoded envelope, so it must never outrank an exact one.
 	const total = $derived(
 		duration && Number.isFinite(duration) && duration > 0
 			? duration
-			: realDuration && Number.isFinite(realDuration) && realDuration > 0
-				? realDuration
-				: probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
-					? probedDuration
+			: probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
+				? probedDuration
+				: realDuration && Number.isFinite(realDuration) && realDuration > 0
+					? realDuration
 					: null
 	);
 	const shown = $derived(
@@ -140,6 +146,8 @@
 		const url = replayUrl;
 		realPeaks = null;
 		realDuration = null;
+		waveformStatus = 'pending';
+		waveformReason = '';
 		if (!url) return;
 		const controller = new AbortController();
 		void (async () => {
@@ -148,7 +156,7 @@
 					signal: controller.signal
 				});
 				if (!res.ok) return;
-				const body = (await res.json()) as { peaks?: unknown; duration?: unknown };
+				const body = (await res.json()) as { peaks?: unknown; duration?: unknown; reason?: unknown };
 				if (Array.isArray(body.peaks)) {
 					const peaks = body.peaks
 						.map(Number)
@@ -159,12 +167,21 @@
 				if (typeof body.duration === 'number' && Number.isFinite(body.duration) && body.duration > 0) {
 					realDuration = body.duration;
 				}
+				waveformStatus = realPeaks ? 'real' : 'estimated';
+				waveformReason = typeof body.reason === 'string' ? body.reason : '';
 			} catch {
 				// decorative fallback
 			}
 		})();
 		return () => controller.abort();
 	});
+
+	/** Why the bars are an approximation, for the "approx." flag's tooltip. */
+	const waveformNote = $derived(
+		waveformReason === 'unsupported'
+			? 'AzuraCast cannot generate a waveform for this recording, so these bars are an approximation. Seeking and comment pins still work.'
+			: 'The waveform could not be loaded, so these bars are an approximation. Seeking and comment pins still work.'
+	);
 
 	function secondsAt(clientX: number, el: HTMLElement): number {
 		if (!total) return 0;
@@ -224,7 +241,12 @@
 {#if replayUrl}
 	<div class="waveform-shell" class:disabled={!active}>
 		<div class="wave-head mono">
-			<span>Waveform</span>
+			<span class="wave-label">
+				Waveform
+				{#if waveformStatus === 'estimated'}
+					<span class="wave-flag" title={waveformNote} aria-label={waveformNote}>approx.</span>
+				{/if}
+			</span>
 			<button
 				class="wave-comment"
 				type="button"
@@ -254,7 +276,7 @@
 			}}
 			onkeydown={onKeyDown}
 		>
-			<div class="bars" aria-hidden="true">
+			<div class="bars" class:approximate={waveformStatus === 'estimated'} aria-hidden="true">
 				{#each bars as height, i (i)}
 					<span
 						class:played={total ? shown / total >= i / bars.length : false}
@@ -327,6 +349,22 @@
 		text-transform: uppercase;
 	}
 
+	.wave-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.wave-flag {
+		border: 1px solid var(--vr-line-muted);
+		padding: 0 0.25rem;
+		color: var(--vr-faint);
+		font-size: 0.6rem;
+		letter-spacing: 0;
+		text-transform: none;
+		cursor: help;
+	}
+
 	.wave-comment {
 		border: 1px solid var(--vr-line-muted);
 		background: transparent;
@@ -384,6 +422,10 @@
 
 	.bars span.played {
 		background: var(--vr-text);
+	}
+
+	.bars.approximate span {
+		opacity: 0.72;
 	}
 
 	.played-shade {

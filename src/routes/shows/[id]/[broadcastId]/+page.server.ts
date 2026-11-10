@@ -61,6 +61,8 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 		favourited,
 		favouriteCount: Number(favouriteTotal?.n ?? 0),
 		canEdit,
+		/** Admin-only Studio entry point for moderating this episode's comments. */
+		isAdmin: user?.role === 'admin',
 		chatUrl,
 		siteKey,
 		giphyKey,

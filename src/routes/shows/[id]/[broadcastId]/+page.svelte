@@ -844,6 +844,13 @@
 				focusNonce={focusCommentsNonce}
 			/>
 		{/key}
+		{#if data.isAdmin}
+			<p class="admin-link mono">
+				<a href={`/studio?tab=chat&room=${encodeURIComponent(data.chatRoom)}`}>
+					Moderate these comments in Studio <span aria-hidden="true">→</span>
+				</a>
+			</p>
+		{/if}
 	</div>
 	{/if}
 </section>
@@ -1164,6 +1171,24 @@
 
 	.episode-chat :global(.chat-panel) {
 		max-width: 100%;
+	}
+
+	.admin-link {
+		margin: 0.6rem 0 0;
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.admin-link a {
+		color: var(--vr-muted);
+		text-decoration: none;
+	}
+
+	.admin-link a:hover,
+	.admin-link a:focus-visible {
+		color: var(--vr-text);
+		text-decoration: underline;
 	}
 
 	.episode-desc :global(p) {
