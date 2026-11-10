@@ -8,6 +8,7 @@
 		playback,
 		playbackBlocked,
 		playMedia,
+		playerPosition,
 		requestSeek,
 		requestSetPlaying,
 		startPlayQueue,
@@ -15,6 +16,9 @@
 	} from '$lib/stores/player';
 	import { formatTrackTime } from '$lib/trackTime';
 	import PlayFromHere from '$lib/components/PlayFromHere.svelte';
+	import ChatPanel from '$lib/components/ChatPanel.svelte';
+	import EpisodeWaveform from '$lib/components/EpisodeWaveform.svelte';
+	import type { ChatMessage } from '$lib/chat';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
 	import { episodeArtOrDefault } from '$lib/azuracast';
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
@@ -39,6 +43,47 @@
 		!!broadcast.replay_url && !$unavailableReplays.has(broadcast.replay_url)
 	);
 	const hasMarks = $derived(tracks.some((t) => t.mark_seconds !== null));
+
+	/**
+	 * Position for a new episode comment: the live replay position when this
+	 * episode is loaded, otherwise the start. Null when there is no replay.
+	 */
+	const chatPosition = $derived.by(() => {
+		const url = broadcast.replay_url;
+		if (!url) return null;
+		const pos = $playerPosition;
+		return pos.url === url ? Math.max(0, Math.floor(pos.seconds)) : 0;
+	});
+
+	const waveformDuration = $derived.by(() => {
+		const url = broadcast.replay_url;
+		if (!url) return null;
+		const pos = $playerPosition;
+		return pos.url === url && pos.duration > 0 ? pos.duration : null;
+	});
+
+	let commentMessages = $state<ChatMessage[]>([]);
+	/** Set when the listener asked to comment at a specific waveform moment. */
+	let pinnedCommentAt = $state<number | null>(null);
+	let focusCommentsNonce = $state(0);
+	let lastCommentRoom = '';
+	$effect(() => {
+		if (lastCommentRoom !== data.chatRoom) {
+			lastCommentRoom = data.chatRoom;
+			commentMessages = data.initialMessages ?? [];
+			pinnedCommentAt = null;
+		}
+	});
+	const commentPosition = $derived(pinnedCommentAt ?? chatPosition);
+
+	function focusCommentComposer(seconds: number) {
+		pinnedCommentAt = Math.max(0, Math.floor(seconds));
+		focusCommentsNonce += 1;
+	}
+
+	function onCommentPosted() {
+		pinnedCommentAt = null;
+	}
 
 	/** Row whose cue marker was last clicked — pinned until playback stops. */
 	let activeMarkId = $state<string | null>(null);
@@ -677,6 +722,17 @@
 			</div>
 		{/if}
 	</div>
+	{#if replayPlayable}
+		<EpisodeWaveform
+			replayUrl={broadcast.replay_url}
+			duration={waveformDuration}
+			currentTime={chatPosition ?? 0}
+			comments={commentMessages}
+			seed={data.chatRoom}
+			onSeek={(seconds) => seekReplay(null, seconds)}
+			onComment={focusCommentComposer}
+		/>
+	{/if}
 	{#if broadcast.description}
 		<div class="episode-desc">{@html broadcast.description}</div>
 	{/if}
@@ -770,6 +826,25 @@
 	{:else}
 		<p class="hint">No tracklist for this broadcast.</p>
 	{/if}
+	<div class="episode-chat">
+		<h2>Episode comments</h2>
+		{#key data.chatRoom}
+			<ChatPanel
+				room={data.chatRoom}
+				chatUrl={data.chatUrl}
+				siteKey={data.siteKey}
+				giphyKey={data.giphyKey}
+				user={data.user}
+				mode="comments"
+				initialMessages={data.initialMessages}
+				position={commentPosition}
+				onseek={(seconds) => seekReplay(null, seconds)}
+				onMessages={(messages) => (commentMessages = messages)}
+				onPosted={onCommentPosted}
+				focusNonce={focusCommentsNonce}
+			/>
+		{/key}
+	</div>
 	{/if}
 </section>
 
@@ -1081,6 +1156,14 @@
 		margin: 0 0 1rem;
 		color: var(--vr-muted);
 		line-height: 1.55;
+	}
+
+	.episode-chat {
+		margin: 1.25rem 0 1.5rem;
+	}
+
+	.episode-chat :global(.chat-panel) {
+		max-width: 100%;
 	}
 
 	.episode-desc :global(p) {

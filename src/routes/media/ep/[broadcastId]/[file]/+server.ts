@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { artUrlHash } from '$lib/azuracast';
+import { artUrlHash, normalizeAzuraCastArtUrl } from '$lib/azuracast';
 import type { RequestHandler } from './$types';
 
 const FILE_RE = /^[0-9a-f]{8}\.jpg$/;
@@ -22,7 +22,9 @@ export const GET: RequestHandler = async ({ params, platform, fetch: cfFetch }) 
 	if (!art || !/^https?:\/\//i.test(art)) error(404, 'Not found');
 	if (artUrlHash(art) !== file.replace(/\.\w+$/, '')) error(404, 'Not found');
 
-	const upstream = await cfFetch(art);
+	// The hash is over the stored URL (what the page linked), but fetch the
+	// current AzuraCast host if the stored value predates a server move.
+	const upstream = await cfFetch(normalizeAzuraCastArtUrl(art));
 	if (!upstream.ok) error(502, 'Upstream error');
 
 	return new Response(upstream.body, {

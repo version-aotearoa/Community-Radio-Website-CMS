@@ -1,4 +1,6 @@
 import { error } from '@sveltejs/kit';
+import { episodeRoomKey } from '$lib/chat';
+import { fetchChatHistory } from '$lib/server/chatHistory';
 import { getShowWithDj, getTracklist, resolveBroadcastForShow } from '$lib/server/shows';
 import { getSavedCueSeconds } from '$lib/server/cues';
 import type { PageServerLoad } from './$types';
@@ -44,6 +46,11 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 		.bind(broadcast.id)
 		.first();
 
+	const chatUrl = platform?.env.PUBLIC_CHAT_URL ?? '';
+	const siteKey = platform?.env.PUBLIC_TURNSTILE_SITE_KEY ?? '';
+	const giphyKey = platform?.env.PUBLIC_GIPHY_API_KEY ?? '';
+	const chatRoom = episodeRoomKey(show.id, broadcast.date);
+
 	return {
 		show,
 		broadcast,
@@ -53,6 +60,11 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 		savedEpisode,
 		favourited,
 		favouriteCount: Number(favouriteTotal?.n ?? 0),
-		canEdit
+		canEdit,
+		chatUrl,
+		siteKey,
+		giphyKey,
+		chatRoom,
+		initialMessages: await fetchChatHistory(chatUrl, chatRoom)
 	};
 };

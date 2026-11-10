@@ -58,6 +58,25 @@ function isCurrentAzuraCastInstance(url: string): boolean {
 }
 
 /**
+ * Stored artwork can predate a server move (e.g. the old stream.version.nz
+ * host). Rewrite only that known legacy host onto the current AzuraCast base;
+ * leave arbitrary external artwork URLs untouched.
+ */
+export function normalizeAzuraCastArtUrl(url: string): string {
+	try {
+		const parsed = new URL(url);
+		if (parsed.hostname === 'stream.version.nz') {
+			const base = new URL(AZURACAST_BASE);
+			parsed.protocol = base.protocol;
+			parsed.host = base.host;
+		}
+		return parsed.href;
+	} catch {
+		return url;
+	}
+}
+
+/**
  * Served image URL for a broadcast tile, in precedence order:
  *
  * 1. `b.art` — the explicit episode artwork URL
