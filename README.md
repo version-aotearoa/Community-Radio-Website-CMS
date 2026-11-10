@@ -4,17 +4,24 @@ Independent radio: live stream player, DJ tracklist editor, public schedule, and
 
 See [ROADMAP.md](ROADMAP.md) for planned features (push notifications).
 
+> **Bring your own AzuraCast.** This repository is the software behind Version
+> Radio, so every instance, station id, domain, Pages/D1/Worker name and brand
+> string in it is *our* value — each one is something you replace to run your own
+> station. Start with [Running your own station](#running-your-own-station).
+
 **Environments**
 
 - **local** — `npm run dev` on your machine; local D1 state; `.dev.vars`
 - **dev (staging)** — `version-radio-staging` Pages project at `https://dev.versionradio.live` (`version-radio-staging.pages.dev`); separate `version-radio-db-staging` + `chat-worker-staging`; preview before prod
 - **prod** — `version-radio` Pages project at `https://versionradio.live` (`version-radio.pages.dev`); `version-radio-db`
 
+Those project names and domains belong to our deployment; substitute yours.
+
 ## Stack
 
 - **Frontend**: SvelteKit (Runes), SVAR Svelte UI (WillowDark theme), hls.js
 - **Platform**: Cloudflare Pages (full-stack) · D1 (SQLite) · Durable Objects (chat) · Better Auth (magic links + social) · Cloudflare Turnstile
-- **Streaming**: self-hosted **AzuraCast** (live HLS, now-playing, replays, artwork) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend)
+- **Streaming**: self-hosted **AzuraCast** (live HLS, now-playing, replays, artwork) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend) and [Running your own station](#running-your-own-station)
 - **PWA**: manifest + service worker (offline app shell)
 
 ## Architecture
@@ -23,7 +30,7 @@ See [ROADMAP.md](ROADMAP.md) for planned features (push notifications).
 - `workers/chat-worker/` — separate Worker owning the `ChatRoom` Durable Object (WebSockets + DO SQLite). SvelteKit does not export DO classes (adapter limitation), so the chat worker is deployed independently and the app connects to it via `PUBLIC_CHAT_URL`.
 - `migrations/` — D1 migrations (domain + auth tables).
 - [`docs/shows-schedule.md`](docs/shows-schedule.md) — shows/broadcasts data model + recurrence/4-week-cycle math.
-- Live stream, now-playing, replays and artwork come from the self-hosted **AzuraCast** backend (`stream.versionradio.live`) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend).
+- Live stream, now-playing, replays and artwork come from the self-hosted **AzuraCast** backend (this deployment: `stream.versionradio.live`) — see [AzuraCast (streaming backend)](#azuracast-streaming-backend).
 
 ## Accounts and chat identity
 
@@ -56,9 +63,52 @@ moment. Comments sit below the tracklist. Public history is readable before
 Turnstile verification; verifying only gates posting and live updates. Studio →
 Chat selects the main room or a recent episode room for moderation.
 
+## Running your own station
+
+Everything here is wired for one station. The table lists what to change; the
+AzuraCast backend is the only hard-coded dependency, and it lives in one file.
+
+| What | Where |
+|---|---|
+| AzuraCast origin, station id, shortcode | `src/lib/azuracast.ts` |
+| Brand title, default description, Bluesky link | `src/lib/site.ts` |
+| Chat worker URL, Turnstile keys, auth + email secrets | `.dev.vars` locally, then Pages project env (see `.dev.vars.example`) |
+| Pages project, D1 database, chat worker names | `wrangler.jsonc`, `deploy/staging/wrangler.jsonc`, `workers/chat-worker/wrangler.jsonc` |
+| Public domains (`versionradio.live`, `dev.versionradio.live`) | Cloudflare Pages custom domains + your DNS |
+| Show importer's source instance | `scripts/import-shows.mjs` |
+
+**AzuraCast** — the app talks to a single backend, configured by three exports in
+`src/lib/azuracast.ts`:
+
+```ts
+export const AZURACAST_BASE = 'https://stream.versionradio.live'; // ← your AzuraCast origin
+export const AZURACAST_STATION_ID = '1';                          // ← your station id
+export const AZURACAST_STATION_SHORTCODE = 'version_radio';
+```
+
+Point those at your instance and the rest follows: live HLS proxying, on-demand
+replay URLs, artwork, and waveform peaks are all derived from them. The
+on-demand/replay endpoints used publicly need no API key; only waveform peaks
+send `AZURACAST_API_KEY` (a station key with access to media data), and the site
+falls back to a decorative waveform without it.
+
+Two Version Radio specifics are safe to delete for a fresh install:
+
+- `normalizeAzuraCastArtUrl()` in `src/lib/azuracast.ts` rewrites stored artwork
+  from the retired `stream.version.nz` host — a one-off migration artefact.
+- `.m4a` recordings in our archive predate the recording-format change; yours
+  will depend on your own AzuraCast settings.
+
 ## AzuraCast (streaming backend)
 
-AzuraCast is an **external, self-hosted dependency** (not run by the app). Instance: `https://stream.versionradio.live` — station id `1`, shortcode `version_radio`, configured in `src/lib/azuracast.ts` (the public endpoints used need **no API key**). It provides the 24/7 live HLS stream (AutoDJ re-air + live DJ input), now-playing/live metadata, on-demand replays, and artwork. The old `stream.version.nz` host was retired in the server move; stored artwork URLs from it are rewritten in `normalizeAzuraCastArtUrl()`.
+AzuraCast is an **external, self-hosted dependency** (not run by the app) — the
+documentation below applies to any instance; this deployment uses
+`https://stream.versionradio.live` with station id `1` and shortcode
+`version_radio` (see [Running your own station](#running-your-own-station)).
+It provides the 24/7 live HLS stream (AutoDJ re-air + live DJ input),
+now-playing/live metadata, on-demand replays, and artwork. The old
+`stream.version.nz` host was retired in the server move; stored artwork URLs
+from it are rewritten in `normalizeAzuraCastArtUrl()`.
 
 **API / stream data used**
 
