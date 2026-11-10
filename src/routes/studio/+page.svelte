@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { Button, Field, Text, Combo } from '@svar-ui/svelte-core';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
-	import { episodeRoomKey, isChatRoom } from '$lib/chat';
+	import { episodeRoomKey, isChatRoom, parseEpisodeRoomKey } from '$lib/chat';
 	import { formatTrackTime } from '$lib/trackTime';
 	import { EVENT_TYPES } from '$lib/eventTypes';
 	import type { ShowRow } from '$lib/server/shows';
@@ -157,7 +157,15 @@
 			label: `${ep.title} — ${ep.date}`
 		}));
 		if (chatRoom !== 'main' && !options.some((o) => o.value === chatRoom)) {
-			options.unshift({ value: chatRoom, label: `${chatRoom.replace(/^episode:/, '')} (linked)` });
+			const linked = data.linkedEpisode;
+			const episode = parseEpisodeRoomKey(chatRoom);
+			const fallback = episode
+				? `${episode.showId} — ${episode.date}`
+				: `${chatRoom.replace(/^episode:/, '')} (linked)`;
+			options.unshift({
+				value: chatRoom,
+				label: linked ? `${linked.title} — ${linked.date}` : fallback
+			});
 		}
 		return options;
 	});

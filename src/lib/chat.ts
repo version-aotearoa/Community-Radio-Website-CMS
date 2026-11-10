@@ -31,7 +31,18 @@ export function episodeRoomKey(showId: string, date: string): string {
 	return `episode:${showId}:${date}`;
 }
 
+export interface EpisodeRoomKey {
+	showId: string;
+	date: string;
+}
+
+/** Split an `episode:<showId>:<YYYY-MM-DD>` room key; null for anything else. */
+export function parseEpisodeRoomKey(room: string): EpisodeRoomKey | null {
+	const m = /^episode:([A-Za-z0-9_-]+):(\d{4}-\d{2}-\d{2})$/.exec(room);
+	return m ? { showId: m[1], date: m[2] } : null;
+}
+
 /** Room names accepted by the chat worker. */
 export function isChatRoom(room: string): boolean {
-	return room === MAIN_CHAT_ROOM || /^episode:[A-Za-z0-9_-]+:\d{4}-\d{2}-\d{2}$/.test(room);
+	return room === MAIN_CHAT_ROOM || parseEpisodeRoomKey(room) !== null;
 }
