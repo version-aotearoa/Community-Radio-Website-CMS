@@ -8,6 +8,9 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+  # Redeploy prod without a code change — needed after editing Pages env vars or
+  # secrets, which are only injected into a new deployment.
+  workflow_dispatch:
 
 jobs:
   deploy:
