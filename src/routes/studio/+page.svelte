@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { Button, Field, Text, Combo } from '@svar-ui/svelte-core';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
-	import { episodeRoomKey } from '$lib/chat';
+	import { episodeRoomKey, isChatRoom } from '$lib/chat';
 	import { formatTrackTime } from '$lib/trackTime';
 	import { EVENT_TYPES } from '$lib/eventTypes';
 	import type { ShowRow } from '$lib/server/shows';
@@ -141,8 +141,26 @@
 	let chatHasMore = $state(false);
 	let chatCursor = $state<{ ts: number; id: string } | null>(null);
 	let chatLoadingMore = $state(false);
-	let chatRoom = $state('main');
+	let chatRoom = $state(
+		(() => {
+			// Deep link from an episode page's "Moderate in Studio" link.
+			const requested = page.url.searchParams.get('room') ?? '';
+			return requested && isChatRoom(requested) ? requested : 'main';
+		})()
+	);
 	const recentEpisodes = $derived(data.recentEpisodes ?? []);
+
+	/** Room options; a deep-linked episode may fall outside the recent-100 window. */
+	const chatRoomOptions = $derived.by(() => {
+		const options = recentEpisodes.map((ep) => ({
+			value: episodeRoomKey(ep.show_id, ep.date),
+			label: `${ep.title} — ${ep.date}`
+		}));
+		if (chatRoom !== 'main' && !options.some((o) => o.value === chatRoom)) {
+			options.unshift({ value: chatRoom, label: `${chatRoom.replace(/^episode:/, '')} (linked)` });
+		}
+		return options;
+	});
 	let purgeName = $state('');
 	let adminError = $state('');
 
@@ -609,6 +627,12 @@
 		chatMessages = [];
 		chatCursor = null;
 		chatHasMore = false;
+		// Keep the address bar in step so the room can be shared/reloaded.
+		const url = new URL(page.url);
+		url.searchParams.set('tab', 'chat');
+		if (room === 'main') url.searchParams.delete('room');
+		else url.searchParams.set('room', room);
+		replaceState(url, {});
 		void loadChat();
 	}
 
@@ -1653,9 +1677,9 @@
 					onchange={(e) => selectChatRoom(e.currentTarget.value)}
 				>
 					<option value="main">Main chat</option>
-					{#each recentEpisodes as ep (ep.id)}
-						<option value={episodeRoomKey(ep.show_id, ep.date)}>
-							{ep.title} — {ep.date}
+					{#each chatRoomOptions as ep (ep.value)}
+						<option value={ep.value}>
+							{ep.label}
 						</option>
 					{/each}
 				</select>
