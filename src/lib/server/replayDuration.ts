@@ -35,10 +35,12 @@ function mp4Duration(bytes: DataView): number | null {
 			bytes.getUint8(offset + 6),
 			bytes.getUint8(offset + 7)
 		);
-		if (size < 8 || offset + size > length) break;
+		if (size < 8) break;
 		if (type === 'moov') {
 			let inner = offset + 8;
-			const end = offset + size;
+			// `moov` is often larger than the fetched slice (sample tables), but
+			// `mvhd` is its first child — so bound the walk to what we have.
+			const end = Math.min(offset + size, length);
 			while (inner + 8 <= end) {
 				const innerSize = bytes.getUint32(inner);
 				const innerType = String.fromCharCode(
@@ -154,7 +156,7 @@ export async function getReplayDuration(
 	if (!trackId) return null;
 
 	const cache = platform?.caches?.default as unknown as EdgeCache | undefined;
-	const cacheKey = `https://vr-replay-duration.internal/v1/${trackId}`;
+	const cacheKey = `https://vr-replay-duration.internal/v2/${trackId}`;
 	if (cache) {
 		const hit = await cache.match(cacheKey);
 		if (hit) {
@@ -189,9 +191,11 @@ export async function getReplayDuration(
 		if (cache) {
 			await cache.put(
 				cacheKey,
+				// A miss is retried soon: a deploy can fix the parser, and a null
+				// must not pin the waveform to its slow fallback for a day.
 				Response.json(
 					{ duration: clean },
-					{ headers: { 'cache-control': `public, max-age=${CACHE_SECONDS}` } }
+					{ headers: { 'cache-control': `public, max-age=${clean ? CACHE_SECONDS : 600}` } }
 				)
 			);
 		}
