@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { formatTrackTime } from '$lib/trackTime';
 	import type { ChatMessage } from '$lib/chat';
 
@@ -10,6 +11,7 @@
 		seed,
 		onSeek,
 		onComment,
+		onReply = null,
 		disabled = false
 	}: {
 		replayUrl: string | null;
@@ -19,6 +21,8 @@
 		seed: string;
 		onSeek: (seconds: number) => void;
 		onComment: (seconds: number) => void;
+		/** Reply to a root comment straight from its pin. */
+		onReply?: ((comment: { id: string; name: string }) => void) | null;
 		disabled?: boolean;
 	} = $props();
 
@@ -92,8 +96,30 @@
 
 	let hoveredMarkerId = $state<string | null>(null);
 	let pinnedMarkerId = $state<string | null>(null);
+	// Hover intent: the tooltip now holds a Reply button, so leaving the pin has
+	// to allow the pointer to travel into the tooltip before it closes.
+	let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+	function keepHover() {
+		if (hoverTimer) {
+			clearTimeout(hoverTimer);
+			hoverTimer = undefined;
+		}
+	}
+	function clearHoverSoon() {
+		if (hoverTimer) clearTimeout(hoverTimer);
+		hoverTimer = setTimeout(() => {
+			hoveredMarkerId = null;
+			hoverTimer = undefined;
+		}, 180);
+	}
 	const activeMarkerId = $derived(pinnedMarkerId ?? hoveredMarkerId);
 	const activeMarker = $derived(markers.find((m) => m.id === activeMarkerId) ?? null);
+
+	function replyToMarker(marker: { id: string; name: string }) {
+		onReply?.({ id: marker.id, name: marker.name });
+		pinnedMarkerId = null;
+		hoveredMarkerId = null;
+	}
 
 	function toggleMarker(id: string) {
 		if (pinnedMarkerId === id) {
@@ -236,6 +262,10 @@
 		if (!total) return 'display:none';
 		return `left:${Math.max(0, Math.min(100, (at / total) * 100))}%`;
 	}
+
+	onDestroy(() => {
+		if (hoverTimer) clearTimeout(hoverTimer);
+	});
 </script>
 
 {#if replayUrl}
@@ -296,10 +326,16 @@
 					aria-controls="wave-tip"
 					aria-describedby={activeMarkerId === marker.id ? 'wave-tip' : undefined}
 					onpointerdown={(e) => e.stopPropagation()}
-					onpointerenter={() => (hoveredMarkerId = marker.id)}
-					onpointerleave={() => (hoveredMarkerId = null)}
-					onfocus={() => (hoveredMarkerId = marker.id)}
-					onblur={() => (hoveredMarkerId = null)}
+					onpointerenter={() => {
+						keepHover();
+						hoveredMarkerId = marker.id;
+					}}
+					onpointerleave={clearHoverSoon}
+					onfocus={() => {
+						keepHover();
+						hoveredMarkerId = marker.id;
+					}}
+					onblur={clearHoverSoon}
 					onclick={(e) => {
 						e.stopPropagation();
 						toggleMarker(marker.id);
@@ -311,10 +347,25 @@
 					id="wave-tip"
 					class="marker-tip {markerTipClass(activeMarker.at)}"
 					style={markerTipStyle(activeMarker.at)}
-					role="tooltip"
+					role="group"
+					aria-label={`Comment by ${activeMarker.name} at ${formatTrackTime(activeMarker.at)}`}
+					onpointerdown={(e) => e.stopPropagation()}
+					onpointerenter={keepHover}
+					onpointerleave={clearHoverSoon}
+					onfocusin={keepHover}
+					onfocusout={clearHoverSoon}
 				>
 					<span class="tip-meta mono">{activeMarker.name} · {formatTrackTime(activeMarker.at)}</span>
 					<span class="tip-body">{activeMarker.content || 'GIF comment'}</span>
+					{#if onReply}
+						<button
+							type="button"
+							class="tip-reply"
+							onclick={() => replyToMarker(activeMarker)}
+						>
+							Reply
+						</button>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -492,7 +543,36 @@
 		padding: 0.45rem 0.55rem;
 		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 		transform: translateX(-50%);
-		pointer-events: none;
+		pointer-events: auto;
+	}
+
+	/* Keep the pointer inside the tooltip while it travels up from the pin. */
+	.marker-tip::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 100%;
+		height: 12px;
+	}
+
+	.tip-reply {
+		margin-top: 0.35rem;
+		border: none;
+		background: transparent;
+		color: var(--vr-muted);
+		font-family: var(--vr-font-mono);
+		font-size: 0.68rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		padding: 0.1rem 0.15rem;
+		cursor: pointer;
+	}
+
+	.tip-reply:hover,
+	.tip-reply:focus-visible {
+		color: var(--vr-text);
+		text-decoration: underline;
 	}
 
 	.marker-tip.tip-left {
