@@ -2,6 +2,12 @@
 	"name": "chat-worker",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-08-01",
+	"vars": {
+		// Hostnames this worker accepts from siteverify. Keep it in config: a
+		// dashboard-only value is wiped by the next `wrangler deploy`, and an
+		// empty allow-list makes verifyTurnstile fail closed for every socket.
+		"TURNSTILE_HOSTNAMES": "versionradio.live"
+	},
 	"durable_objects": {
 		"bindings": [
 			{

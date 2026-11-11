@@ -32,4 +32,6 @@ jobs:
         run: npx wrangler pages deploy ../../.svelte-kit/cloudflare --project-name version-radio-staging --branch main
       - name: Deploy chat worker (staging)
         working-directory: workers/chat-worker
-        run: npx wrangler deploy --name chat-worker-staging
+        # Override the prod allow-list: staging is served from dev.versionradio.live
+        # and uses Turnstile's test keys, whose siteverify hostname is example.com.
+        run: npx wrangler deploy --name chat-worker-staging --var TURNSTILE_HOSTNAMES:dev.versionradio.live,example.com
