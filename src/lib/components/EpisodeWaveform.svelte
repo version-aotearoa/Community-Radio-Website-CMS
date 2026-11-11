@@ -275,6 +275,8 @@
 				Waveform
 				{#if waveformStatus === 'estimated'}
 					<span class="wave-flag" title={waveformNote} aria-label={waveformNote}>approx.</span>
+				{:else if waveformStatus === 'pending'}
+					<span class="wave-flag wave-loading" role="status" title="Loading waveform…">loading</span>
 				{/if}
 			</span>
 			<button
@@ -414,6 +416,26 @@
 		letter-spacing: 0;
 		text-transform: none;
 		cursor: help;
+	}
+
+	.wave-loading {
+		cursor: default;
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		.wave-loading {
+			animation: wave-flag-pulse 1.2s ease-in-out infinite;
+		}
+	}
+
+	@keyframes wave-flag-pulse {
+		0%,
+		100% {
+			opacity: 0.45;
+		}
+		50% {
+			opacity: 1;
+		}
 	}
 
 	.wave-comment {
