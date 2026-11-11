@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { episodeRoomKey } from '$lib/chat';
 import { fetchChatHistory } from '$lib/server/chatHistory';
+import { getReplayDuration } from '$lib/server/replayDuration';
 import { getShowWithDj, getTracklist, resolveBroadcastForShow } from '$lib/server/shows';
 import { getSavedCueSeconds } from '$lib/server/cues';
 import type { PageServerLoad } from './$types';
@@ -63,6 +64,8 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 		canEdit,
 		/** Admin-only Studio entry point for moderating this episode's comments. */
 		isAdmin: user?.role === 'admin',
+		/** Container-parsed length, so the waveform is seekable before playback. */
+		replayDuration: await getReplayDuration(platform, broadcast.replay_url),
 		chatUrl,
 		siteKey,
 		giphyKey,

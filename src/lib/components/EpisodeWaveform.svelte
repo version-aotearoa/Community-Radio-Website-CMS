@@ -9,6 +9,7 @@
 		currentTime,
 		comments,
 		seed,
+		serverDuration = null,
 		onSeek,
 		onComment,
 		onReply = null,
@@ -16,6 +17,8 @@
 	}: {
 		replayUrl: string | null;
 		duration: number | null;
+		/** Container-parsed length from the server; beats the browser probe. */
+		serverDuration?: number | null;
 		currentTime: number;
 		comments: ChatMessage[];
 		seed: string;
@@ -62,6 +65,8 @@
 	let waveformReason = $state('');
 	let scrub = $state<number | null>(null);
 	let scrubbing = $state(false);
+	/** Fraction of the timeline tapped before the length was known. */
+	let pendingFraction = $state<number | null>(null);
 
 	const bars = $derived(realPeaks && realPeaks.length > 0 ? realPeaks : makeBars(seed, BAR_COUNT));
 
@@ -71,11 +76,13 @@
 	const total = $derived(
 		duration && Number.isFinite(duration) && duration > 0
 			? duration
-			: probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
-				? probedDuration
-				: realDuration && Number.isFinite(realDuration) && realDuration > 0
-					? realDuration
-					: null
+			: serverDuration && Number.isFinite(serverDuration) && serverDuration > 0
+				? serverDuration
+				: probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
+					? probedDuration
+					: realDuration && Number.isFinite(realDuration) && realDuration > 0
+						? realDuration
+						: null
 	);
 	const shown = $derived(
 		Math.max(0, Math.min(total ?? Number.MAX_SAFE_INTEGER, scrub ?? currentTime))
@@ -151,7 +158,9 @@
 	$effect(() => {
 		const url = replayUrl;
 		probedDuration = null;
-		if (!url) return;
+		// A server-parsed length makes this probe redundant — and on a large
+		// recording it competes with the player's own request for the same file.
+		if (!url || (serverDuration && serverDuration > 0)) return;
 		const audio = new Audio();
 		audio.preload = 'metadata';
 		const onLoaded = () => {
@@ -211,32 +220,46 @@
 
 	function secondsAt(clientX: number, el: HTMLElement): number {
 		if (!total) return 0;
+		return fractionAt(clientX, el) * total;
+	}
+
+	function fractionAt(clientX: number, el: HTMLElement): number {
 		const rect = el.getBoundingClientRect();
-		const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-		return fraction * total;
+		return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
 	}
 
 	function onPointerDown(e: PointerEvent) {
 		pinnedMarkerId = null;
-		if (!active) return;
+		// Accept the press even before the length is known: the fraction is queued
+		// and applied as soon as a duration arrives, rather than silently dropped.
+		if (disabled) return;
 		const el = e.currentTarget as HTMLElement;
 		scrubbing = true;
-		scrub = secondsAt(e.clientX, el);
+		scrub = total ? fractionAt(e.clientX, el) * total : null;
 		el.setPointerCapture?.(e.pointerId);
 	}
 
 	function onPointerMove(e: PointerEvent) {
 		if (!scrubbing) return;
-		scrub = secondsAt(e.clientX, e.currentTarget as HTMLElement);
+		scrub = total ? fractionAt(e.clientX, e.currentTarget as HTMLElement) * total : null;
 	}
 
 	function onPointerEnd(e: PointerEvent) {
 		if (!scrubbing) return;
-		const target = secondsAt(e.clientX, e.currentTarget as HTMLElement);
+		const fraction = fractionAt(e.clientX, e.currentTarget as HTMLElement);
 		scrubbing = false;
 		scrub = null;
-		onSeek(target);
+		if (total) onSeek(fraction * total);
+		else pendingFraction = fraction;
 	}
+
+	// Apply a tap that landed before the duration was known.
+	$effect(() => {
+		if (!total || pendingFraction === null) return;
+		const fraction = pendingFraction;
+		pendingFraction = null;
+		onSeek(fraction * total);
+	});
 
 	function onKeyDown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
@@ -291,7 +314,7 @@
 		<div
 			class="waveform"
 			class:scrubbing
-			class:inactive={!active}
+			class:inactive={disabled}
 			role="slider"
 			tabindex={active ? 0 : -1}
 			aria-label="Seek the episode recording"

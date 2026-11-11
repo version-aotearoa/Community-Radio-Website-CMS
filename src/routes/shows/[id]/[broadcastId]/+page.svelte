@@ -778,6 +778,7 @@
 		<EpisodeWaveform
 			replayUrl={broadcast.replay_url}
 			duration={waveformDuration}
+			serverDuration={data.replayDuration}
 			currentTime={chatPosition ?? 0}
 			comments={commentMessages}
 			seed={data.chatRoom}
