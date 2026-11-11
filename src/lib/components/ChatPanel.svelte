@@ -19,7 +19,8 @@
 		onseek = null,
 		onMessages = null,
 		onPosted = null,
-		focusNonce = 0
+		focusNonce = 0,
+		replyRequest = null
 	}: {
 		room: string;
 		chatUrl: string;
@@ -34,6 +35,8 @@
 		onMessages?: ((messages: ChatMessage[]) => void) | null;
 		onPosted?: (() => void) | null;
 		focusNonce?: number;
+		/** Ask the composer to reply to a comment (from a waveform pin). */
+		replyRequest?: { comment: { id: string; name: string }; nonce: number } | null;
 	} = $props();
 
 	// Keep no more than the worker's history window (HISTORY_LIMIT = 299 + the
@@ -103,6 +106,7 @@
 	let replyTo = $state<ChatMessage | null>(null);
 	let composerEl: HTMLFormElement | undefined = $state();
 	let lastFocusNonce = 0;
+	let lastReplyNonce = 0;
 
 	const displayName = $derived(
 		user ? displayNameFor(user) : assignedName || handle || 'Listener'
@@ -156,6 +160,24 @@
 			// here fights the mobile keyboard and can leave the input hidden.
 			composerEl?.querySelector('input')?.focus();
 		}
+	});
+
+	$effect(() => {
+		// Reply requested from outside (a waveform pin). The nonce makes a repeat
+		// reply to the same comment re-trigger, including on first mount.
+		const request = replyRequest;
+		if (!request || request.nonce === lastReplyNonce) return;
+		lastReplyNonce = request.nonce;
+		if (!isComments) return;
+		const match = messages.find((m) => m.id === request.comment.id);
+		replyTo = match ?? ({
+			id: request.comment.id,
+			name: request.comment.name,
+			ts: 0,
+			content: ''
+		} satisfies ChatMessage);
+		// Wait for the reply banner to render before taking focus.
+		setTimeout(() => composerEl?.querySelector('input')?.focus(), 0);
 	});
 
 	$effect(() => {

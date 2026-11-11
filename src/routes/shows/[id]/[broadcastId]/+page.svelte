@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount, onDestroy } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidateAll, replaceState } from '$app/navigation';
 	import ShowActions from '$lib/components/ShowActions.svelte';
 	import {
 		clearPlayQueue,
@@ -67,6 +67,56 @@
 	let pinnedCommentAt = $state<number | null>(null);
 	let focusCommentsNonce = $state(0);
 	let lastCommentRoom = '';
+
+	/**
+	 * Tracklist / comments tabs. Comments are mounted lazily: the Turnstile widget
+	 * does not reliably solve inside a hidden panel, and most visits never open it.
+	 */
+	const initialTab =
+		page.url.searchParams.get('tab') === 'comments' && !page.url.searchParams.get('t')
+			? 'comments'
+			: 'tracklist';
+	let activeTab = $state<'tracklist' | 'comments'>(initialTab);
+	let chatPanelMounted = $state(initialTab === 'comments');
+	let commentsPanelEl: HTMLDivElement | undefined = $state();
+	let replyRequest = $state<{ comment: { id: string; name: string }; nonce: number } | null>(null);
+	let replyNonce = 0;
+
+	const rootCommentCount = $derived(commentMessages.filter((m) => !m.parentId).length);
+
+	function selectTab(tab: 'tracklist' | 'comments') {
+		activeTab = tab;
+		if (tab === 'comments') chatPanelMounted = true;
+		const url = new URL(page.url);
+		if (tab === 'comments') url.searchParams.set('tab', 'comments');
+		else url.searchParams.delete('tab');
+		replaceState(url, {});
+	}
+
+	function onTabKeydown(e: KeyboardEvent) {
+		if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+		e.preventDefault();
+		const next: 'tracklist' | 'comments' =
+			e.key === 'Home' ? 'tracklist' : e.key === 'End' ? 'comments' : activeTab === 'tracklist' ? 'comments' : 'tracklist';
+		selectTab(next);
+		setTimeout(() => document.getElementById(`ep-tab-${next}`)?.focus(), 0);
+	}
+
+	/** Reply to a comment tapped on the waveform. */
+	function replyToComment(comment: { id: string; name: string }) {
+		selectTab('comments');
+		replyNonce += 1;
+		replyRequest = { comment, nonce: replyNonce };
+		// The panel may have just mounted; scroll once it is in the DOM.
+		setTimeout(() => {
+			if (!commentsPanelEl) return;
+			const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+			commentsPanelEl.scrollIntoView({
+				block: 'center',
+				behavior: reduceMotion ? 'auto' : 'smooth'
+			});
+		}, 0);
+	}
 	$effect(() => {
 		if (lastCommentRoom !== data.chatRoom) {
 			lastCommentRoom = data.chatRoom;
@@ -78,6 +128,7 @@
 
 	function focusCommentComposer(seconds: number) {
 		pinnedCommentAt = Math.max(0, Math.floor(seconds));
+		selectTab('comments');
 		focusCommentsNonce += 1;
 	}
 
@@ -121,6 +172,7 @@
 		const t = Number(page.url.searchParams.get('t'));
 		if (Number.isFinite(t) && t > 0) {
 			const seconds = Math.floor(t);
+			selectTab('tracklist');
 			startDeepLink(seconds);
 			scrollToDeepLinkRow(seconds);
 		}
@@ -731,12 +783,50 @@
 			seed={data.chatRoom}
 			onSeek={(seconds) => seekReplay(null, seconds)}
 			onComment={focusCommentComposer}
+			onReply={replyToComment}
 		/>
 	{/if}
 	{#if broadcast.description}
 		<div class="episode-desc">{@html broadcast.description}</div>
 	{/if}
-	<h2>Tracklist</h2>
+	<div class="panel-tabs" role="tablist" aria-label="Episode content">
+		<button
+			id="ep-tab-tracklist"
+			class="panel-tab mono"
+			class:active={activeTab === 'tracklist'}
+			role="tab"
+			aria-selected={activeTab === 'tracklist'}
+			aria-controls="ep-panel-tracklist"
+			tabindex={activeTab === 'tracklist' ? 0 : -1}
+			onclick={() => selectTab('tracklist')}
+			onkeydown={onTabKeydown}
+		>
+			Tracklist
+			{#if tracks.length}<span class="tab-count">{tracks.length}</span>{/if}
+		</button>
+		<button
+			id="ep-tab-comments"
+			class="panel-tab mono"
+			class:active={activeTab === 'comments'}
+			role="tab"
+			aria-selected={activeTab === 'comments'}
+			aria-controls="ep-panel-comments"
+			tabindex={activeTab === 'comments' ? 0 : -1}
+			onclick={() => selectTab('comments')}
+			onkeydown={onTabKeydown}
+		>
+			Comments
+			{#if rootCommentCount}<span class="tab-count">{rootCommentCount}</span>{/if}
+		</button>
+	</div>
+	<div
+		id="ep-panel-tracklist"
+		class="panel-body"
+		role="tabpanel"
+		aria-labelledby="ep-tab-tracklist"
+		tabindex="0"
+		hidden={activeTab !== 'tracklist'}
+	>
 	{#if tracks.length}
 		<div class="tracklist-scroll">
 			<ol class="tracklist">
@@ -826,30 +916,43 @@
 	{:else}
 		<p class="hint">No tracklist for this broadcast.</p>
 	{/if}
-	<div class="episode-chat">
-		<h2>Episode comments</h2>
-		{#key data.chatRoom}
-			<ChatPanel
-				room={data.chatRoom}
-				chatUrl={data.chatUrl}
-				siteKey={data.siteKey}
-				giphyKey={data.giphyKey}
-				user={data.user}
-				mode="comments"
-				initialMessages={data.initialMessages}
-				position={commentPosition}
-				onseek={(seconds) => seekReplay(null, seconds)}
-				onMessages={(messages) => (commentMessages = messages)}
-				onPosted={onCommentPosted}
-				focusNonce={focusCommentsNonce}
-			/>
-		{/key}
-		{#if data.isAdmin}
-			<p class="admin-link mono">
-				<a href={`/studio?tab=chat&room=${encodeURIComponent(data.chatRoom)}`}>
-					Moderate these comments in Studio <span aria-hidden="true">→</span>
-				</a>
-			</p>
+	</div>
+	<div
+		id="ep-panel-comments"
+		class="panel-body"
+		role="tabpanel"
+		aria-labelledby="ep-tab-comments"
+		tabindex="0"
+		hidden={activeTab !== 'comments'}
+		bind:this={commentsPanelEl}
+	>
+		{#if chatPanelMounted}
+			<div class="episode-chat">
+				{#key data.chatRoom}
+					<ChatPanel
+						room={data.chatRoom}
+						chatUrl={data.chatUrl}
+						siteKey={data.siteKey}
+						giphyKey={data.giphyKey}
+						user={data.user}
+						mode="comments"
+						initialMessages={data.initialMessages}
+						position={commentPosition}
+						onseek={(seconds) => seekReplay(null, seconds)}
+						onMessages={(messages) => (commentMessages = messages)}
+						onPosted={onCommentPosted}
+						focusNonce={focusCommentsNonce}
+						replyRequest={replyRequest}
+					/>
+				{/key}
+				{#if data.isAdmin}
+					<p class="admin-link mono">
+						<a href={`/studio?tab=chat&room=${encodeURIComponent(data.chatRoom)}`}>
+							Moderate these comments in Studio <span aria-hidden="true">→</span>
+						</a>
+					</p>
+				{/if}
+			</div>
 		{/if}
 	</div>
 	{/if}
@@ -931,17 +1034,6 @@
 		border: 1px solid var(--vr-line);
 		background: var(--vr-surface);
 		padding: 1.25rem 1.5rem;
-	}
-
-	.card h2 {
-		font-family: var(--vr-font-mono);
-		font-size: 0.82rem;
-		font-weight: 500;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-		margin: 0 0 1rem;
-		border-bottom: 1px solid var(--vr-line);
-		padding-bottom: 0.6rem;
 	}
 
 	.tracklist {
@@ -1165,8 +1257,56 @@
 		line-height: 1.55;
 	}
 
+	.panel-tabs {
+		display: flex;
+		border-bottom: 1px solid var(--vr-line);
+		margin-top: 0.5rem;
+	}
+
+	.panel-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		background: transparent;
+		border: none;
+		border-bottom: 2px solid transparent;
+		color: var(--vr-muted);
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 0.55rem 0.85rem;
+		cursor: pointer;
+	}
+
+	.panel-tab:hover {
+		color: var(--vr-text);
+	}
+
+	.panel-tab.active {
+		color: var(--vr-text);
+		border-bottom-color: var(--vr-text);
+	}
+
+	.panel-tab:focus-visible {
+		outline: none;
+		box-shadow: 0 0 0 2px var(--vr-bg), 0 0 0 3px var(--vr-text);
+	}
+
+	.tab-count {
+		color: var(--vr-faint);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.panel-body {
+		padding-top: 0.85rem;
+	}
+
+	.panel-body:focus-visible {
+		outline: none;
+	}
+
 	.episode-chat {
-		margin: 1.25rem 0 1.5rem;
+		margin: 0 0 1rem;
 	}
 
 	.episode-chat :global(.chat-panel) {
