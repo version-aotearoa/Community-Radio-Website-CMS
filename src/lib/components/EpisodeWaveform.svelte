@@ -67,6 +67,8 @@
 	let scrubbing = $state(false);
 	/** Fraction of the timeline tapped before the length was known. */
 	let pendingFraction = $state<number | null>(null);
+	/** Pointer position over the track, for the hover guide and time chip. */
+	let hoverFraction = $state<number | null>(null);
 
 	const bars = $derived(realPeaks && realPeaks.length > 0 ? realPeaks : makeBars(seed, BAR_COUNT));
 
@@ -240,8 +242,12 @@
 	}
 
 	function onPointerMove(e: PointerEvent) {
+		const el = e.currentTarget as HTMLElement;
+		// Hover affordance is mouse-only: touch has no hover state, and a chip
+		// left behind after a tap reads as a stuck tooltip.
+		if (e.pointerType === 'mouse') hoverFraction = fractionAt(e.clientX, el);
 		if (!scrubbing) return;
-		scrub = total ? fractionAt(e.clientX, e.currentTarget as HTMLElement) * total : null;
+		scrub = total ? fractionAt(e.clientX, el) * total : null;
 	}
 
 	function onPointerEnd(e: PointerEvent) {
@@ -294,14 +300,11 @@
 {#if replayUrl}
 	<div class="waveform-shell" class:disabled={!active}>
 		<div class="wave-head mono">
-			<span class="wave-label">
-				Waveform
-				{#if waveformStatus === 'estimated'}
-					<span class="wave-flag" title={waveformNote} aria-label={waveformNote}>approx.</span>
-				{:else if waveformStatus === 'pending'}
-					<span class="wave-flag wave-loading" role="status" title="Loading waveform…">loading</span>
-				{/if}
-			</span>
+			{#if waveformStatus === 'estimated'}
+				<span class="wave-flag" title={waveformNote} aria-label={waveformNote}>approx.</span>
+			{:else if waveformStatus === 'pending'}
+				<span class="wave-flag wave-loading" role="status" title="Loading waveform…">loading</span>
+			{/if}
 			<button
 				class="wave-comment"
 				type="button"
@@ -329,6 +332,7 @@
 				scrubbing = false;
 				scrub = null;
 			}}
+			onpointerleave={() => (hoverFraction = null)}
 			onkeydown={onKeyDown}
 		>
 			<div class="bars" class:approximate={waveformStatus === 'estimated'} aria-hidden="true">
@@ -341,6 +345,22 @@
 			</div>
 			<div class="played-shade" aria-hidden="true" style:width={`${pct}%`}></div>
 			<div class="playhead" aria-hidden="true" style:left={`${pct}%`}></div>
+			{#if hoverFraction !== null && total && !activeMarker}
+				<div
+					class="hover-line"
+					style:left={`${hoverFraction * 100}%`}
+					aria-hidden="true"
+				></div>
+				<span
+					class="hover-time mono"
+					class:edge-left={hoverFraction < 0.12}
+					class:edge-right={hoverFraction > 0.88}
+					style:left={`${hoverFraction * 100}%`}
+					aria-hidden="true"
+				>
+					{formatTrackTime(hoverFraction * total)}<em>seek</em>
+				</span>
+			{/if}
 			{#each markers as marker (marker.id)}
 				<button
 					type="button"
@@ -416,7 +436,7 @@
 	.wave-head {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-end;
 		gap: 0.75rem;
 		margin-bottom: 0.45rem;
 		color: var(--vr-muted);
@@ -425,13 +445,8 @@
 		text-transform: uppercase;
 	}
 
-	.wave-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
-
 	.wave-flag {
+		margin-right: auto;
 		border: 1px solid var(--vr-line-muted);
 		padding: 0 0.25rem;
 		color: var(--vr-faint);
@@ -492,6 +507,10 @@
 		outline: none;
 	}
 
+	.waveform.scrubbing {
+		cursor: col-resize;
+	}
+
 	.waveform:focus-visible {
 		box-shadow: 0 0 0 2px var(--vr-bg), 0 0 0 3px var(--vr-text);
 	}
@@ -537,9 +556,53 @@
 		top: -2px;
 		bottom: -2px;
 		width: 2px;
-		background: var(--vr-red);
+		background: var(--vr-text);
 		pointer-events: none;
 		transform: translateX(-1px);
+		z-index: 2;
+	}
+
+	.hover-line {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 1px;
+		background: var(--vr-faint);
+		pointer-events: none;
+		transform: translateX(-0.5px);
+		z-index: 1;
+	}
+
+	.hover-time {
+		position: absolute;
+		bottom: 2px;
+		transform: translateX(-50%);
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.3rem;
+		padding: 0.05rem 0.3rem;
+		border: 1px solid var(--vr-line-muted);
+		background: var(--vr-surface);
+		color: var(--vr-text);
+		font-size: 0.62rem;
+		white-space: nowrap;
+		pointer-events: none;
+		z-index: 3;
+	}
+
+	.hover-time em {
+		color: var(--vr-faint);
+		font-style: normal;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.hover-time.edge-left {
+		transform: translateX(0);
+	}
+
+	.hover-time.edge-right {
+		transform: translateX(-100%);
 	}
 
 	.pin {
@@ -549,10 +612,10 @@
 		height: 12px;
 		margin-left: -4px;
 		padding: 0;
-		border: 1px solid var(--vr-red);
+		border: 1px solid var(--vr-green);
 		background: var(--vr-bg);
 		cursor: pointer;
-		z-index: 2;
+		z-index: 4;
 	}
 
 	.pin::after {
@@ -562,12 +625,12 @@
 		top: 3px;
 		width: 1px;
 		height: 6px;
-		background: var(--vr-red);
+		background: var(--vr-green);
 	}
 
 	.pin:hover,
 	.pin:focus-visible {
-		background: var(--vr-red);
+		background: var(--vr-green);
 		outline: none;
 	}
 
@@ -685,6 +748,8 @@
 	@media (max-width: 640px) {
 		.waveform {
 			height: 68px;
+			/* Let vertical swipes scroll the page; horizontal drags still scrub. */
+			touch-action: pan-y;
 		}
 
 		.bars {
