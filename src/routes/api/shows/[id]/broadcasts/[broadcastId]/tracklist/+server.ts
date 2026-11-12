@@ -32,6 +32,7 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 
 	const body = (await request.json()) as {
 		tracks?: Array<{
+			id?: string;
 			title?: string;
 			artist?: string;
 			album?: string;
@@ -53,6 +54,7 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 	}
 	const filtered = body.tracks
 		.map((t) => ({
+			id: typeof t.id === 'string' && t.id !== '' ? t.id : null,
 			title: String(t.title ?? ''),
 			artist: String(t.artist ?? ''),
 			album: String(t.album ?? ''),

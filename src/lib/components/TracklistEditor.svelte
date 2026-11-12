@@ -39,6 +39,8 @@
 	let error = $state('');
 	let notice = $state('');
 	let tracks = $state<TrackRow[]>([]);
+	/** Where "Back to episode" goes — the listener view of this broadcast. */
+	const episodeHref = $derived(`/shows/${show.id}/${broadcast.id}`);
 	// Live mirror of the grid contents. The grid's internal store is controlled
 	// by the `data` prop (resets on reinit), so the mirror is the save source.
 	// NOTE: positions in the mirror/grid are 1-based (display numbers); the DB
@@ -193,6 +195,40 @@
 		});
 		invalidMarks = invalid;
 	}
+
+	/** True when the mirror differs from the last saved rows. */
+	const dirty = $derived.by(() => {
+		if (editable.length !== tracks.length) return true;
+		for (let i = 0; i < editable.length; i++) {
+			const saved = tracks[i];
+			const current = editable[i];
+			if (
+				saved.title !== current.title ||
+				saved.artist !== current.artist ||
+				saved.album !== current.album ||
+				(saved.url ?? '') !== (current.url ?? '') ||
+				(saved.mark_seconds ?? null) !== (current.mark_seconds ?? null)
+			) {
+				return true;
+			}
+		}
+		return false;
+	});
+
+	function handleExit(e: MouseEvent) {
+		if (!dirty) return;
+		if (!confirm('You have unsaved tracklist changes. Leave anyway?')) e.preventDefault();
+	}
+
+	$effect(() => {
+		if (!dirty) return;
+		const handler = (e: BeforeUnloadEvent) => {
+			e.preventDefault();
+			e.returnValue = '';
+		};
+		window.addEventListener('beforeunload', handler);
+		return () => window.removeEventListener('beforeunload', handler);
+	});
 
 	const columns = [
 		{ id: 'position', header: '#', width: 54 },
@@ -509,6 +545,7 @@
 		saving = true;
 		const payload = editable
 			.map((t) => ({
+				id: t.id,
 				title: t.title,
 				artist: t.artist,
 				album: t.album,
@@ -609,7 +646,10 @@
 		}
 		const seconds = Math.max(0, Math.floor(pos.seconds));
 		await gridApi?.exec('update-row', { id, row: { mark: formatTrackTime(seconds) } });
-		resyncFromGrid();
+		// Keep the mirror authoritative: the grid event may fire before its own
+		// state has the new value, and a stale resync used to drop the mark (and
+		// could drop a concurrent edit on the next save).
+		editable = editable.map((row) => (row.id === id ? { ...row, mark_seconds: seconds } : row));
 		stampNotice = `Stamped ${formatTrackTime(seconds)} into the selected row.`;
 	}
 </script>
@@ -623,6 +663,7 @@
 			Broadcast: <strong>{broadcast.date}</strong> · {fmtTime(broadcast.start_minutes)}
 		</p>
 	</div>
+	<a class="exit-btn mono" href={episodeHref} onclick={handleExit}>Back to episode</a>
 </div>
 
 <div class="tabs" role="tablist">
@@ -873,6 +914,26 @@
 		gap: 1rem;
 		flex-wrap: wrap;
 		margin-bottom: 1rem;
+	}
+
+	.exit-btn {
+		margin-left: auto;
+		align-self: flex-start;
+		border: 1px solid var(--vr-line);
+		padding: 0.35rem 0.7rem;
+		color: var(--vr-text);
+		text-decoration: none;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+	}
+
+	.exit-btn:hover,
+	.exit-btn:focus-visible {
+		background: var(--vr-text);
+		color: var(--vr-black);
+		border-color: var(--vr-text);
 	}
 
 	.eyebrow {
