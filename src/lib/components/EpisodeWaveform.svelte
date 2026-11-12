@@ -99,9 +99,27 @@
 				id: m.id,
 				at: Math.max(0, Math.min(total ?? m.atSeconds!, m.atSeconds!)),
 				name: m.name,
-				content: m.content
+				content: m.content,
+				initial: initialFor(m.name),
+				hue: hueFor(m.name)
 			}))
 	);
+
+	/** First letter/digit of a display name — the marker's identifying glyph. */
+	function initialFor(name: string): string {
+		const match = name.trim().match(/[\p{L}\p{N}]/u);
+		return match ? match[0].toUpperCase() : '•';
+	}
+
+	/** Stable hue per commenter, so the same person always reads the same colour. */
+	function hueFor(name: string): number {
+		let hash = 2166136261;
+		for (let i = 0; i < name.length; i++) {
+			hash ^= name.charCodeAt(i);
+			hash = Math.imul(hash, 16777619);
+		}
+		return (hash >>> 0) % 360;
+	}
 
 	let hoveredMarkerId = $state<string | null>(null);
 	let pinnedMarkerId = $state<string | null>(null);
@@ -365,7 +383,7 @@
 				<button
 					type="button"
 					class="pin"
-					style={pinStyle(marker.at)}
+					style={`${pinStyle(marker.at)};color:hsl(${marker.hue} 75% 62%)`}
 					aria-label={`Show comment by ${marker.name} at ${formatTrackTime(marker.at)}`}
 					aria-expanded={pinnedMarkerId === marker.id}
 					aria-controls="wave-tip"
@@ -385,7 +403,9 @@
 						e.stopPropagation();
 						toggleMarker(marker.id);
 					}}
-				></button>
+				>
+					<span aria-hidden="true">{marker.initial}</span>
+				</button>
 			{/each}
 			{#if activeMarker}
 				<div
@@ -607,36 +627,37 @@
 
 	.pin {
 		position: absolute;
-		top: -4px;
-		width: 9px;
-		height: 12px;
-		margin-left: -4px;
+		top: -7px;
+		width: 16px;
+		height: 16px;
+		margin-left: -8px;
 		padding: 0;
-		border: 1px solid var(--vr-green);
+		display: grid;
+		place-items: center;
+		border: 1px solid currentColor;
+		border-radius: 50%;
 		background: var(--vr-bg);
+		font-family: var(--vr-font-mono);
+		font-size: 0.55rem;
+		line-height: 1;
+		color: var(--vr-green);
 		cursor: pointer;
 		z-index: 4;
 	}
 
-	.pin::after {
-		content: '';
-		position: absolute;
-		left: 3px;
-		top: 3px;
-		width: 1px;
-		height: 6px;
-		background: var(--vr-green);
+	.pin span {
+		transform: translateY(-0.5px);
 	}
 
 	.pin:hover,
 	.pin:focus-visible {
-		background: var(--vr-green);
+		background: currentColor;
 		outline: none;
 	}
 
-	.pin:hover::after,
-	.pin:focus-visible::after {
-		background: var(--vr-bg);
+	.pin:hover span,
+	.pin:focus-visible span {
+		color: var(--vr-bg);
 	}
 
 	.marker-tip {
