@@ -3,8 +3,9 @@
  * recording, kept in "My Version" (`/account` → Tracks).
  *
  * Cues are snapshots keyed on (user, broadcast, mark_seconds) — never on
- * track.id, because replaceTracklist() re-inserts every row with a fresh UUID on
- * each save. See migrations/0029_saved_track.sql.
+ * track.id: a cue should survive the DJ reworking a tracklist, and rows can be
+ * recreated (new id) when a tracklist is replaced wholesale.
+ * See migrations/0029_saved_track.sql.
  */
 
 export interface SavedCueInput {

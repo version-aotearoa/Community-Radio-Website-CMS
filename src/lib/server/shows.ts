@@ -89,6 +89,8 @@ export interface TrackRow {
 }
 
 export interface TrackInput {
+	/** Existing row id — lets a save update in place instead of re-inserting. */
+	id?: string | null;
 	title: string;
 	artist?: string;
 	album?: string;
@@ -972,7 +974,15 @@ export async function getBroadcastTracksMap(
 	return result;
 }
 
-/** Atomically replaces a broadcast's tracklist (delete + insert in one D1 batch). */
+/**
+ * Save a broadcast's tracklist.
+ *
+ * Rows are matched by id, so a save updates existing rows in place and only
+ * inserts genuinely new ones. The previous delete-all-and-reinsert wiped every
+ * title/artist/album the client failed to echo back — a transient client bug
+ * turned into permanent data loss — and rotated row ids (which `setTrackStream`
+ * keys on).
+ */
 export async function replaceTracklist(
 	db: D1Database,
 	broadcastId: string,
@@ -980,31 +990,75 @@ export async function replaceTracklist(
 ): Promise<TrackRow[]> {
 	const t = now();
 	const broadcast = await getBroadcast(db, broadcastId);
-	const stmts = [
-		db.prepare('DELETE FROM track WHERE broadcast_id = ?').bind(broadcastId),
-		...tracks.map((track, i) =>
-			db
-				.prepare(
-					`INSERT INTO track (id, show_id, broadcast_id, position, title, artist, album, url, embed_id, album_id, duration_seconds, mark_seconds, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
-				)
-				.bind(
-					crypto.randomUUID(),
-					broadcast!.show_id,
-					broadcastId,
-					i,
-					track.title.trim().slice(0, 300),
-					track.artist?.trim().slice(0, 200) ?? '',
-					track.album?.trim().slice(0, 200) ?? '',
-					track.url?.trim().slice(0, 500) ?? null,
-					track.embedId ?? null,
-					track.albumId ?? null,
-					isValidMark(track.markSeconds) ? track.markSeconds : null,
-					t,
-					t
-				)
-		)
-	];
-	await db.batch(stmts);
+	const existing = await db
+		.prepare('SELECT id FROM track WHERE broadcast_id = ?')
+		.bind(broadcastId)
+		.all<{ id: string }>();
+	const existingIds = new Set((existing.results ?? []).map((row) => String(row.id)));
+
+	const kept = new Set<string>();
+	const stmts: D1PreparedStatement[] = [];
+
+	tracks.forEach((track, i) => {
+		const requestedId = typeof track.id === 'string' ? track.id : '';
+		const isExisting = requestedId !== '' && existingIds.has(requestedId);
+		const id = isExisting ? requestedId : crypto.randomUUID();
+		kept.add(id);
+
+		const values = [
+			i,
+			track.title.trim().slice(0, 300),
+			track.artist?.trim().slice(0, 200) ?? '',
+			track.album?.trim().slice(0, 200) ?? '',
+			track.url?.trim().slice(0, 500) ?? null,
+			track.embedId ?? null,
+			track.albumId ?? null,
+			isValidMark(track.markSeconds) ? track.markSeconds : null,
+			t
+		] as const;
+
+		if (isExisting) {
+			stmts.push(
+				db
+					.prepare(
+						`UPDATE track SET position = ?, title = ?, artist = ?, album = ?, url = ?,
+						   embed_id = ?, album_id = ?, mark_seconds = ?, updated_at = ?
+						 WHERE id = ?`
+					)
+					.bind(...values, id)
+			);
+		} else {
+			stmts.push(
+				db
+					.prepare(
+						`INSERT INTO track (id, show_id, broadcast_id, position, title, artist, album, url, embed_id, album_id, duration_seconds, mark_seconds, created_at, updated_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+					)
+					.bind(
+						id,
+						broadcast!.show_id,
+						broadcastId,
+						values[0],
+						values[1],
+						values[2],
+						values[3],
+						values[4],
+						values[5],
+						values[6],
+						values[7],
+						values[8],
+						values[8]
+					)
+			);
+		}
+	});
+
+	// Anything the client dropped is removed explicitly, so a stale payload can
+	// no longer take unrelated rows with it.
+	for (const id of existingIds) {
+		if (!kept.has(id)) stmts.push(db.prepare('DELETE FROM track WHERE id = ?').bind(id));
+	}
+
+	if (stmts.length > 0) await db.batch(stmts);
 	return getTracklist(db, broadcastId);
 }
