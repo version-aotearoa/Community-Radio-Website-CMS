@@ -18,6 +18,7 @@
 	} from '$lib/stores/player';
 	import { live, startLivePolling } from '$lib/stores/live';
 	import { liveArtOf } from '$lib/api/live';
+	import { formatTrackTime } from '$lib/trackTime';
 	import { AZURACAST_BASE, AZURACAST_STATION_SHORTCODE } from '$lib/azuracast';
 	import SeekControl from '$lib/components/SeekControl.svelte';
 
@@ -98,6 +99,52 @@
 	);
 
 	const stationSticker = $derived(mediaMode ? 'Archive' : isLive ? 'Live now' : 'Replay');
+
+	// ---- AutoDJ re-air timeline ----
+	// A re-air is a plain HLS stream with no media-element timeline, but
+	// /api/live reports the recording's length and when it started. Tick locally
+	// so the readout moves every second rather than every 30s poll.
+	let clock = $state(Date.now());
+	$effect(() => {
+		const id = setInterval(() => (clock = Date.now()), 1000);
+		return () => clearInterval(id);
+	});
+
+	let reairAnchor = $state<{ at: number; elapsed: number } | null>(null);
+	$effect(() => {
+		const np = livePayload?.nowPlaying;
+		if (!np || isLive || mediaMode) {
+			reairAnchor = null;
+			return;
+		}
+		const sinceStart = np.playedAt != null ? Math.floor(Date.now() / 1000) - np.playedAt : null;
+		const elapsed = sinceStart ?? np.elapsed;
+		if (elapsed == null || elapsed < 0) {
+			reairAnchor = null;
+			return;
+		}
+		reairAnchor = { at: Date.now(), elapsed };
+	});
+
+	const reairDuration = $derived.by(() => {
+		const np = livePayload?.nowPlaying;
+		if (mediaMode || isLive || !np) return null;
+		const value = np.duration;
+		return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+	});
+
+	const reairElapsed = $derived.by(() => {
+		if (!reairDuration || !reairAnchor) return null;
+		const seconds = reairAnchor.elapsed + (clock - reairAnchor.at) / 1000;
+		return Math.max(0, Math.min(reairDuration, seconds));
+	});
+
+	/** Screen-reader friendly summary, e.g. "12 minutes into a 96 minute show". */
+	const reairLabel = $derived(
+		reairDuration && reairElapsed !== null
+			? `${Math.round(reairElapsed / 60)} minutes into a ${Math.round(reairDuration / 60)} minute show`
+			: ''
+	);
 
 	// A re-air's encoder metadata usually repeats the show name, so the title
 	// line above the "On air: <show>" link would duplicate it — drop it then.
@@ -766,6 +813,14 @@
 				{#if mediaMode && Number.isFinite(duration) && duration > 0}
 					<SeekControl {currentTime} {duration} onSeek={seekTo} />
 				{/if}
+				{#if !mediaMode && reairDuration && reairElapsed !== null}
+					<span class="reair-time sheet-reair mono" aria-label={reairLabel}
+						>{formatTrackTime(reairElapsed)} / {formatTrackTime(reairDuration)}</span
+					>
+					<div class="reair-progress" aria-hidden="true">
+						<span style:width={`${(reairElapsed / reairDuration) * 100}%`}></span>
+					</div>
+				{/if}
 				{#if !mediaMode}
 					{#if isLive}
 						{#if identity}
@@ -943,6 +998,10 @@
 				{/if}
 				{#if mediaMode && Number.isFinite(duration) && duration > 0}
 					<SeekControl {currentTime} {duration} onSeek={seekTo} compact />
+				{:else if reairDuration && reairElapsed !== null}
+					<span class="track mono muted reair-time" aria-label={reairLabel}
+						>{formatTrackTime(reairElapsed)} / {formatTrackTime(reairDuration)}</span
+					>
 				{:else if media?.artist}
 					<span class="track mono muted">{media.artist}</span>
 				{/if}
@@ -1093,6 +1152,26 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		max-width: 36rem;
+	}
+
+	.reair-time {
+		font-variant-numeric: tabular-nums;
+		letter-spacing: 0.02em;
+	}
+
+	.reair-progress {
+		width: 100%;
+		max-width: 22rem;
+		height: 2px;
+		margin-top: 0.35rem;
+		background: var(--vr-line-muted);
+	}
+
+	.reair-progress span {
+		display: block;
+		height: 100%;
+		background: var(--vr-text);
+		transition: width 1s linear;
 	}
 
 	.track.big {
