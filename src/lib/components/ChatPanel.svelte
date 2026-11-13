@@ -20,7 +20,10 @@
 		onMessages = null,
 		onPosted = null,
 		focusNonce = 0,
-		replyRequest = null
+		replyRequest = null,
+		onShare = null,
+		focusCommentId = null,
+		copiedCommentId = null
 	}: {
 		room: string;
 		chatUrl: string;
@@ -37,6 +40,12 @@
 		focusNonce?: number;
 		/** Ask the composer to reply to a comment (from a waveform pin). */
 		replyRequest?: { comment: { id: string; name: string }; nonce: number } | null;
+		/** Copy a permalink to this comment (comments mode only). */
+		onShare?: ((msg: ChatMessage) => void) | null;
+		/** Comment to scroll to and flash when a permalink is opened. */
+		focusCommentId?: string | null;
+		/** Id of the comment whose link was just copied, for the tick state. */
+		copiedCommentId?: string | null;
 	} = $props();
 
 	// Keep no more than the worker's history window (HISTORY_LIMIT = 299 + the
@@ -178,6 +187,26 @@
 		} satisfies ChatMessage);
 		// Wait for the reply banner to render before taking focus.
 		setTimeout(() => composerEl?.querySelector('input')?.focus(), 0);
+	});
+
+	let flashId = $state<string | null>(null);
+	let flashTimer: ReturnType<typeof setTimeout> | undefined;
+
+	$effect(() => {
+		const id = focusCommentId;
+		// `messages` is read so this re-runs once the shared link's history renders.
+		const loaded = messages.length;
+		if (!id || loaded === 0) return;
+		const el = document.getElementById(`comment-${id}`);
+		if (!el) return;
+		el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		flashId = id;
+		if (flashTimer) clearTimeout(flashTimer);
+		flashTimer = setTimeout(() => (flashId = null), 1800);
+	});
+
+	$effect(() => () => {
+		if (flashTimer) clearTimeout(flashTimer);
 	});
 
 	$effect(() => {
@@ -557,8 +586,10 @@
 {#snippet messageBlock(msg: ChatMessage, isReply: boolean)}
 	<div
 		class="msg"
+		id={`comment-${msg.id}`}
 		class:mine={msg.mine ?? msg.name === displayName}
 		class:reply={isReply}
+		class:flash={flashId === msg.id}
 	>
 		<div class="msg-meta">
 			{#if isComments && !isReply && msg.atSeconds !== null && msg.atSeconds !== undefined}
@@ -572,6 +603,24 @@
 					</button>
 				{:else}
 					<span class="comment-time">{formatTrackTime(msg.atSeconds)}</span>
+				{/if}
+				{#if onShare}
+					<button
+						class="comment-copy"
+						onclick={() => onShare?.(msg)}
+						aria-label={`Copy link to this comment at ${formatTrackTime(msg.atSeconds as number)}`}
+						title="Copy link to this comment"
+					>
+						{#if copiedCommentId === msg.id}
+							<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+								<path d="M4 12.5l5 5L20 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+							</svg>
+						{:else}
+							<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+								<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+							</svg>
+						{/if}
+					</button>
 				{/if}
 			{/if}
 			<span class="msg-name">{msg.name}</span>
@@ -816,6 +865,27 @@
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.comment-copy {
+		border: none;
+		background: transparent;
+		color: var(--vr-faint);
+		padding: 0.1rem 0.15rem;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.comment-copy:hover,
+	.comment-copy:focus-visible {
+		color: var(--vr-text);
+	}
+
+	.msg.flash {
+		outline: 1px solid var(--vr-text);
+		outline-offset: 1px;
 	}
 
 	.reply-btn {

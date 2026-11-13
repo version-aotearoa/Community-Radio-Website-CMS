@@ -84,9 +84,13 @@
 
 	const rootCommentCount = $derived(commentMessages.filter((m) => !m.parentId).length);
 
-	function selectTab(tab: 'tracklist' | 'comments') {
+	function selectTab(tab: 'tracklist' | 'comments', syncUrl = true) {
 		activeTab = tab;
 		if (tab === 'comments') chatPanelMounted = true;
+		// `replaceState` talks to the router root, which does not exist yet during
+		// onMount — calling it there throws and aborts the rest of hydration. The
+		// initial tab is therefore applied with plain state (see onMount).
+		if (!syncUrl) return;
 		const url = new URL(page.url);
 		if (tab === 'comments') url.searchParams.set('tab', 'comments');
 		else url.searchParams.delete('tab');
@@ -172,9 +176,16 @@
 		const t = Number(page.url.searchParams.get('t'));
 		if (Number.isFinite(t) && t > 0) {
 			const seconds = Math.floor(t);
-			selectTab('tracklist');
+			selectTab('tracklist', false);
 			startDeepLink(seconds);
 			scrollToDeepLinkRow(seconds);
+		}
+
+		// Comment permalink: same time, but open the comments tab and flash it.
+		const commentParam = page.url.searchParams.get('comment');
+		if (commentParam) {
+			selectTab('comments', false);
+			focusedCommentId = commentParam;
 		}
 	});
 
@@ -483,6 +494,29 @@
 		copyTimer = setTimeout(() => (copiedCue = null), 1600);
 	}
 
+	/* ---- Comment permalinks: same link shape, plus the comment to highlight ---- */
+
+	let copiedCommentId = $state<string | null>(null);
+	let commentCopyTimer: ReturnType<typeof setTimeout> | null = null;
+	let focusedCommentId = $state<string | null>(null);
+
+	function commentHref(id: string, seconds: number): string {
+		const origin = typeof location === 'undefined' ? '' : location.origin;
+		const at = Math.max(0, Math.floor(seconds));
+		return `${origin}/shows/${show.id}/${broadcast.id}?t=${at}&comment=${encodeURIComponent(id)}`;
+	}
+
+	async function copyCommentLink(id: string, seconds: number) {
+		try {
+			await navigator.clipboard.writeText(commentHref(id, seconds));
+		} catch {
+			return;
+		}
+		copiedCommentId = id;
+		if (commentCopyTimer) clearTimeout(commentCopyTimer);
+		commentCopyTimer = setTimeout(() => (copiedCommentId = null), 1600);
+	}
+
 	/* ---- Shared-link helper: "Play from here" when autoplay is blocked ---- */
 
 	let deepLink = $state<{ seconds: number; track: TrackRow | null } | null>(null);
@@ -537,6 +571,7 @@
 
 	onDestroy(() => {
 		if (copyTimer) clearTimeout(copyTimer);
+		if (commentCopyTimer) clearTimeout(commentCopyTimer);
 		if (deepLinkTimer) clearTimeout(deepLinkTimer);
 	});
 
@@ -785,6 +820,7 @@
 			onSeek={(seconds) => seekReplay(null, seconds)}
 			onComment={focusCommentComposer}
 			onReply={replyToComment}
+			onShare={(comment) => void copyCommentLink(comment.id, comment.at)}
 		/>
 	{/if}
 	{#if broadcast.description}
@@ -944,6 +980,9 @@
 						onPosted={onCommentPosted}
 						focusNonce={focusCommentsNonce}
 						replyRequest={replyRequest}
+						onShare={(msg) => void copyCommentLink(msg.id, msg.atSeconds ?? 0)}
+						focusCommentId={focusedCommentId}
+						copiedCommentId={copiedCommentId}
 					/>
 				{/key}
 				{#if data.isAdmin}

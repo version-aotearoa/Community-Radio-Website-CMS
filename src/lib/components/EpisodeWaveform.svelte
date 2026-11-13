@@ -14,6 +14,7 @@
 		onSeek,
 		onComment = null,
 		onReply = null,
+		onShare = null,
 		disabled = false
 	}: {
 		replayUrl: string | null;
@@ -29,6 +30,8 @@
 		onComment?: ((seconds: number) => void) | null;
 		/** Reply to a root comment straight from its pin. */
 		onReply?: ((comment: { id: string; name: string }) => void) | null;
+		/** Copy a permalink to a root comment from its pin. */
+		onShare?: ((comment: { id: string; name: string; at: number }) => void) | null;
 		disabled?: boolean;
 	} = $props();
 
@@ -434,14 +437,27 @@
 				>
 					<span class="tip-meta mono">{activeMarker.name} · {formatTrackTime(activeMarker.at)}</span>
 					<span class="tip-body">{activeMarker.content || 'GIF comment'}</span>
-					{#if onReply}
-						<button
-							type="button"
-							class="tip-reply"
-							onclick={() => replyToMarker(activeMarker)}
-						>
-							Reply
-						</button>
+					{#if onReply || onShare}
+						<div class="tip-actions">
+							{#if onReply}
+								<button
+									type="button"
+									class="tip-reply"
+									onclick={() => replyToMarker(activeMarker)}
+								>
+									Reply
+								</button>
+							{/if}
+							{#if onShare}
+								<button
+									type="button"
+									class="tip-reply"
+									onclick={() => onShare?.({ id: activeMarker.id, name: activeMarker.name, at: activeMarker.at })}
+								>
+									Copy link
+								</button>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			{/if}
@@ -697,8 +713,13 @@
 		height: 12px;
 	}
 
-	.tip-reply {
+	.tip-actions {
+		display: flex;
+		gap: 0.75rem;
 		margin-top: 0.35rem;
+	}
+
+	.tip-reply {
 		border: none;
 		background: transparent;
 		color: var(--vr-muted);
