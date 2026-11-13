@@ -10,8 +10,9 @@
 		comments,
 		seed,
 		serverDuration = null,
+		mode = 'comments',
 		onSeek,
-		onComment,
+		onComment = null,
 		onReply = null,
 		disabled = false
 	}: {
@@ -19,11 +20,13 @@
 		duration: number | null;
 		/** Container-parsed length from the server; beats the browser probe. */
 		serverDuration?: number | null;
+		/** 'seek' strips the comment affordances (Studio's tracklist editor). */
+		mode?: 'comments' | 'seek';
 		currentTime: number;
 		comments: ChatMessage[];
 		seed: string;
 		onSeek: (seconds: number) => void;
-		onComment: (seconds: number) => void;
+		onComment?: ((seconds: number) => void) | null;
 		/** Reply to a root comment straight from its pin. */
 		onReply?: ((comment: { id: string; name: string }) => void) | null;
 		disabled?: boolean;
@@ -141,6 +144,9 @@
 	}
 	const activeMarkerId = $derived(pinnedMarkerId ?? hoveredMarkerId);
 	const activeMarker = $derived(markers.find((m) => m.id === activeMarkerId) ?? null);
+
+	/** Studio's editor only needs the timeline, not the comment affordances. */
+	const seekOnly = $derived(mode === 'seek');
 
 	function replyToMarker(marker: { id: string; name: string }) {
 		onReply?.({ id: marker.id, name: marker.name });
@@ -317,21 +323,25 @@
 
 {#if replayUrl}
 	<div class="waveform-shell" class:disabled={!active}>
-		<div class="wave-head mono">
-			{#if waveformStatus === 'estimated'}
-				<span class="wave-flag" title={waveformNote} aria-label={waveformNote}>approx.</span>
-			{:else if waveformStatus === 'pending'}
-				<span class="wave-flag wave-loading" role="status" title="Loading waveform…">loading</span>
-			{/if}
-			<button
-				class="wave-comment"
-				type="button"
-				disabled={!total}
-				onclick={() => onComment(Math.round(shown))}
-			>
-				Comment at {formatTrackTime(shown)}
-			</button>
-		</div>
+		{#if !seekOnly || waveformStatus !== 'real'}
+			<div class="wave-head mono">
+				{#if waveformStatus === 'estimated'}
+					<span class="wave-flag" title={waveformNote} aria-label={waveformNote}>approx.</span>
+				{:else if waveformStatus === 'pending'}
+					<span class="wave-flag wave-loading" role="status" title="Loading waveform…">loading</span>
+				{/if}
+				{#if !seekOnly && onComment}
+					<button
+						class="wave-comment"
+						type="button"
+						disabled={!total}
+						onclick={() => onComment?.(Math.round(shown))}
+					>
+						Comment at {formatTrackTime(shown)}
+					</button>
+				{/if}
+			</div>
+		{/if}
 		<div
 			class="waveform"
 			class:scrubbing
@@ -379,6 +389,7 @@
 					{formatTrackTime(hoverFraction * total)}<em>seek</em>
 				</span>
 			{/if}
+			{#if !seekOnly}
 			{#each markers as marker (marker.id)}
 				<button
 					type="button"
@@ -407,6 +418,7 @@
 					<span aria-hidden="true">{marker.initial}</span>
 				</button>
 			{/each}
+			{/if}
 			{#if activeMarker}
 				<div
 					id="wave-tip"
