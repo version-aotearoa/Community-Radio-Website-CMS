@@ -12,4 +12,10 @@
 	<title>{show.title} — {broadcast.date} tracklist — Version Radio</title>
 </svelte:head>
 
-<TracklistEditor {show} {broadcast} {tracks} breadcrumbHref={`/shows/${show.id}`} />
+<TracklistEditor
+	{show}
+	{broadcast}
+	{tracks}
+	replayDuration={data.replayDuration}
+	breadcrumbHref={`/shows/${show.id}`}
+/>

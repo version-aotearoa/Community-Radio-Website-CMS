@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { requireDj } from '$lib/server/guard';
 import { getShow, getTracklist, resolveBroadcastForShow } from '$lib/server/shows';
+import { getReplayDuration } from '$lib/server/replayDuration';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, platform }) => {
@@ -16,5 +17,11 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	if (!broadcast) error(404, 'Broadcast not found');
 
 	const tracks = await getTracklist(db, broadcast.id);
-	return { show, broadcast, tracks };
+	return {
+		show,
+		broadcast,
+		tracks,
+		/** Container-parsed length so the editor's waveform is seekable immediately. */
+		replayDuration: await getReplayDuration(platform, broadcast.replay_url)
+	};
 };

@@ -4,7 +4,7 @@
 	import { Button } from '@svar-ui/svelte-core';
 	import { get } from 'svelte/store';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
-	import SeekControl from '$lib/components/SeekControl.svelte';
+	import EpisodeWaveform from '$lib/components/EpisodeWaveform.svelte';
 	import { parseTracksCsv, toTracksCsv, tracklistCsvFilename } from '$lib/csv';
 	import { formatTrackTime, parseTrackTime } from '$lib/trackTime';
 	import {
@@ -25,11 +25,14 @@
 		show,
 		broadcast,
 		tracks: initialTracks,
+		replayDuration = null,
 		breadcrumbHref = '/studio'
 	}: {
 		show: ShowRow;
 		broadcast: BroadcastRow;
 		tracks: TrackRow[];
+		/** Container-parsed replay length, so the waveform seeks before playback. */
+		replayDuration?: number | null;
 		breadcrumbHref?: string;
 	} = $props();
 
@@ -109,6 +112,21 @@
 	);
 	const replayUnavailable = $derived(!!replayUrl && $unavailableReplays.has(replayUrl));
 
+	/** The replay as a player source, optionally starting at an offset. */
+	function replaySource(startAt: number | null = null) {
+		return {
+			url: replayUrl,
+			title: show.title,
+			artist: show.dj_handle || null,
+			art: artPreview,
+			show: { id: show.id, title: show.title },
+			href: `/shows/${show.id}/${broadcast.id}`,
+			broadcastId: broadcast.id,
+			date: broadcast.date,
+			startAt
+		};
+	}
+
 	function toggleReplayPreview() {
 		if (!replayUrl || replayUnavailable) return;
 		if (replayMine) {
@@ -117,16 +135,7 @@
 		}
 		// Same path as the public episode page: one shared <audio> element.
 		clearPlayQueue();
-		playMedia({
-			url: replayUrl,
-			title: show.title,
-			artist: show.dj_handle || null,
-			art: artPreview,
-			show: { id: show.id, title: show.title },
-			href: `/shows/${show.id}/${broadcast.id}`,
-			broadcastId: broadcast.id,
-			date: broadcast.date
-		});
+		playMedia(replaySource());
 	}
 
 	/** Skip ±`delta` seconds; clamping happens in the player store. */
@@ -135,8 +144,16 @@
 		requestSeek(Math.max(0, (replayPos?.seconds ?? 0) + delta));
 	}
 
-	function seekReplayPreview(seconds: number) {
-		if (replayMine) requestSeek(seconds);
+	/** Seek the waveform; start the replay there if it isn't loaded yet. */
+	function seekFromWaveform(seconds: number) {
+		if (!replayUrl || replayUnavailable) return;
+		const target = Math.max(0, Math.floor(seconds));
+		if (replayMine) {
+			requestSeek(target);
+			return;
+		}
+		clearPlayQueue();
+		playMedia(replaySource(target));
 	}
 
 	const GRID_EVENTS = [
@@ -834,16 +851,6 @@
 			<span class="strip-time mono">
 				{formatTrackTime(replayPos?.seconds ?? 0)} / {formatTrackTime(replayPos?.duration ?? 0)}
 			</span>
-			{#if replayMine && replayPos && replayPos.duration > 0}
-				<div class="strip-seek">
-					<SeekControl
-						currentTime={replayPos.seconds}
-						duration={replayPos.duration}
-						onSeek={seekReplayPreview}
-						compact
-					/>
-				</div>
-			{/if}
 			<button
 				class="strip-btn stamp"
 				onclick={stampSelected}
@@ -854,6 +861,19 @@
 			</button>
 		{/if}
 	</div>
+
+	{#if replayUrl && !replayUnavailable}
+		<EpisodeWaveform
+			replayUrl={replayUrl}
+			duration={replayMine ? (replayPos?.duration ?? null) : null}
+			serverDuration={replayDuration}
+			currentTime={replayPos?.seconds ?? 0}
+			comments={[]}
+			seed={broadcast.id}
+			mode="seek"
+			onSeek={seekFromWaveform}
+		/>
+	{/if}
 
 	<div class="tracklist-actions">
 		<Button css="vr-cta ghost" onclick={() => fileInput?.click()}>Import CSV</Button>
@@ -1060,11 +1080,6 @@
 		white-space: nowrap;
 	}
 
-	.strip-seek {
-		flex: 0 1 220px;
-		min-width: 140px;
-		display: flex;
-	}
 
 	.strip-note {
 		font-size: 0.78rem;
