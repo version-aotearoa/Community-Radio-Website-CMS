@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { Button, Text } from '@svar-ui/svelte-core';
 	import Turnstile from '$lib/components/Turnstile.svelte';
+	import CopyLinkIcon from '$lib/components/CopyLinkIcon.svelte';
 	import GifPicker from '$lib/components/GifPicker.svelte';
 	import { displayNameFor, needsDisplayName } from '$lib/displayName';
 	import { formatTrackTime } from '$lib/trackTime';
@@ -608,18 +609,12 @@
 					<button
 						class="comment-copy"
 						onclick={() => onShare?.(msg)}
-						aria-label={`Copy link to this comment at ${formatTrackTime(msg.atSeconds as number)}`}
-						title="Copy link to this comment"
+						aria-label={copiedCommentId === msg.id
+							? 'Copied'
+							: `Copy link to this comment at ${formatTrackTime(msg.atSeconds as number)}`}
+						title={copiedCommentId === msg.id ? 'Copied' : 'Copy link to this comment'}
 					>
-						{#if copiedCommentId === msg.id}
-							<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
-								<path d="M4 12.5l5 5L20 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-							</svg>
-						{:else}
-							<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
-								<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-							</svg>
-						{/if}
+						<CopyLinkIcon copied={copiedCommentId === msg.id} />
 					</button>
 				{/if}
 			{/if}

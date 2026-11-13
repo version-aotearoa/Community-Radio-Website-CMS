@@ -18,6 +18,7 @@
 	import PlayFromHere from '$lib/components/PlayFromHere.svelte';
 	import ChatPanel from '$lib/components/ChatPanel.svelte';
 	import EpisodeWaveform from '$lib/components/EpisodeWaveform.svelte';
+	import CopyLinkIcon from '$lib/components/CopyLinkIcon.svelte';
 	import type { ChatMessage } from '$lib/chat';
 	import { bandcampArtUrl, isBandcampPageUrl } from '$lib/bandcamp';
 	import { episodeArtOrDefault } from '$lib/azuracast';
@@ -675,42 +676,17 @@
 			disabled={sec === null}
 			aria-label={sec === null
 				? 'No time mark for this track'
-				: `Copy link to ${formatTrackTime(sec)}`}
-			title={sec === null ? 'No time mark for this track' : 'Copy link to this point'}
+				: copiedCue === sec
+					? 'Copied'
+					: `Copy link to ${formatTrackTime(sec)}`}
+			title={sec === null
+				? 'No time mark for this track'
+				: copiedCue === sec
+					? 'Copied'
+					: 'Copy link to this point'}
 			onclick={() => sec !== null && void copyCue(sec)}
 		>
-			{#if sec !== null && copiedCue === sec}
-				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-					<path
-						d="M4 12.5l5 5L20 6.5"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-				</svg>
-			{:else}
-				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-					<rect
-						x="9"
-						y="9"
-						width="11"
-						height="11"
-						rx="1.5"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.8"
-					/>
-					<path
-						d="M6 15V5.5A1.5 1.5 0 0 1 7.5 4H17"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.8"
-						stroke-linecap="round"
-					/>
-				</svg>
-			{/if}
+			<CopyLinkIcon copied={sec !== null && copiedCue === sec} />
 		</button>
 	{/if}
 {/snippet}
