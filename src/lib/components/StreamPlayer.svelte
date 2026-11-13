@@ -257,11 +257,20 @@
 		const key = p.kind === 'media' ? `media:${p.url}` : 'live';
 		if (key === prevKey) return;
 		prevKey = key;
-		currentTime = 0;
 		duration = NaN;
 		// A recording may start at a cue marker (`startAt`); live never does.
-		pendingSeek = p.kind === 'media' ? (p.startAt ?? null) : null;
-		playerPosition.set({ url: p.kind === 'media' ? p.url : null, seconds: 0, duration: 0 });
+		const startAt = p.kind === 'media' ? (p.startAt ?? null) : null;
+		pendingSeek = startAt;
+		// Show the requested offset straight away: a deep link or cue click should
+		// put the playhead where it will start, even while metadata is loading or
+		// autoplay is blocked. loadedmetadata confirms/corrects this below.
+		const optimistic = startAt != null ? Math.max(0, Math.floor(startAt)) : 0;
+		currentTime = optimistic;
+		playerPosition.set({
+			url: p.kind === 'media' ? p.url : null,
+			seconds: optimistic,
+			duration: 0
+		});
 		if (!audioEl) return;
 		if (p.kind === 'media') {
 			stopLive();
