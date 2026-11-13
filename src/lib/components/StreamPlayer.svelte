@@ -248,6 +248,11 @@
 	});
 
 	let prevKey = 'live';
+	/** Set while a switch to a media source still owes a play() after seeking. */
+	let pendingPlay = false;
+	/** Where the last seek asked to land, for a single corrective re-seek. */
+	let lastSeekTarget: number | null = null;
+	let seekCorrections = 0;
 
 	$effect(() => {
 		const p = $playback;
@@ -262,12 +267,21 @@
 		if (!audioEl) return;
 		if (p.kind === 'media') {
 			stopLive();
+			lastSeekTarget = null;
+			seekCorrections = 0;
 			audioEl.src = p.url;
 			setLoading(true, 'switch:media');
-			audioEl.play().catch(() => {
-				setLoading(false, 'play-rejected:switch-media');
-				playbackBlocked.set(true);
-			});
+			// A cue start is applied once the duration is known. Playing from 0
+			// first makes the browser fetch the wrong range and can land a few
+			// seconds off, which is what made the same cue start inconsistently.
+			pendingPlay = true;
+			if (pendingSeek === null) {
+				pendingPlay = false;
+				audioEl.play().catch(() => {
+					setLoading(false, 'play-rejected:switch-media');
+					playbackBlocked.set(true);
+				});
+			}
 		} else {
 			stopMedia();
 			initLiveEngine();
@@ -522,6 +536,18 @@
 				duration = audioEl?.duration ?? NaN;
 				applyPendingSeek();
 			});
+			audioEl.addEventListener('seeked', () => {
+				// Some demuxers land a little off the requested position. Correct
+				// once, then accept whatever the browser settled on.
+				if (lastSeekTarget === null || !audioEl) return;
+				if (Math.abs(audioEl.currentTime - lastSeekTarget) > 1.5 && seekCorrections < 1) {
+					seekCorrections += 1;
+					audioEl.currentTime = lastSeekTarget;
+					return;
+				}
+				lastSeekTarget = null;
+				seekCorrections = 0;
+			});
 		}
 		window.addEventListener('keydown', onKey);
 		document.addEventListener('visibilitychange', onVisibilityChange);
@@ -568,6 +594,8 @@
 	function seekTo(sec: number) {
 		if (!audioEl || !Number.isFinite(duration) || duration <= 0) return;
 		const target = Math.max(0, Math.min(sec, duration));
+		lastSeekTarget = target;
+		seekCorrections = 0;
 		audioEl.currentTime = target;
 		currentTime = target;
 	}
@@ -582,6 +610,13 @@
 		if (!Number.isFinite(duration) || duration <= 0) return;
 		seekTo(pendingSeek);
 		pendingSeek = null;
+		if (pendingPlay) {
+			pendingPlay = false;
+			audioEl.play().catch(() => {
+				setLoading(false, 'play-rejected:pending-seek');
+				playbackBlocked.set(true);
+			});
+		}
 	}
 
 	function trackText() {

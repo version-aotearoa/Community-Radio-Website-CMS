@@ -136,6 +136,76 @@ function mp3Duration(bytes: DataView, totalBytes: number | null): number | null 
 	return null;
 }
 
+/** Read the four ASCII bytes at `offset` (empty when they run past the slice). */
+function magicAt(bytes: DataView, offset: number, length: number): string {
+	if (offset + length > bytes.byteLength) return '';
+	let out = '';
+	for (let i = 0; i < length; i++) out += String.fromCharCode(bytes.getUint8(offset + i));
+	return out;
+}
+
+/**
+ * FLAC's STREAMINFO holds an exact sample count. AzuraCast happily serves FLAC
+ * uploads, and a lossless file has no MPEG sync words — the old fallback used to
+ * pick a false one and report a wildly wrong length (1.79× on a real episode).
+ */
+function flacDuration(bytes: DataView): number | null {
+	if (magicAt(bytes, 0, 4) !== 'fLaC') return null;
+	let offset = 4;
+	// Metadata blocks: 1 byte (last<<7 | type) + 3-byte big-endian length.
+	while (offset + 4 <= bytes.byteLength) {
+		const header = bytes.getUint8(offset);
+		const type = header & 0x7f;
+		const length = (bytes.getUint8(offset + 1) << 16) | (bytes.getUint8(offset + 2) << 8) | bytes.getUint8(offset + 3);
+		const body = offset + 4;
+		if (body + length > bytes.byteLength) return null;
+		if (type === 0) {
+			if (length < 18) return null;
+			// 20 bits sample rate, 3 bits channels, 5 bits depth, 36 bits samples.
+			const sampleRate = (bytes.getUint8(body + 10) << 12) | (bytes.getUint8(body + 11) << 4) | (bytes.getUint8(body + 12) >> 4);
+			const totalSamples =
+				(bytes.getUint8(body + 13) & 0x0f) * 2 ** 32 +
+				((bytes.getUint8(body + 14) << 24) | (bytes.getUint8(body + 15) << 16) | (bytes.getUint8(body + 16) << 8) | bytes.getUint8(body + 17));
+			if (sampleRate <= 0 || totalSamples <= 0) return null;
+			return totalSamples / sampleRate;
+		}
+		if ((header & 0x80) !== 0) return null;
+		offset = body + length;
+	}
+	return null;
+}
+
+/** True when the slice starts with (or soon contains) a plausible MPEG frame sync. */
+function looksLikeMpeg(bytes: DataView): boolean {
+	const limit = Math.min(bytes.byteLength - 4, 2048);
+	for (let i = 0; i < limit; i++) {
+		if (bytes.getUint8(i) !== 0xff) continue;
+		if ((bytes.getUint8(i + 1) & 0xe0) !== 0xe0) continue;
+		const bitrateIndex = (bytes.getUint8(i + 2) & 0xf0) >> 4;
+		const sampleRateIndex = (bytes.getUint8(i + 2) & 0x0c) >> 2;
+		if (bitrateIndex === 0 || bitrateIndex === 15 || sampleRateIndex === 3) continue;
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Exact duration where the container carries one (MP4 `mvhd`, FLAC STREAMINFO,
+ * MP3 `TLEN`), and null when it doesn't — a guess is worse than letting the
+ * browser's metadata probe answer.
+ */
+function durationForContainer(bytes: DataView, totalBytes: number | null): number | null {
+	const magic4 = magicAt(bytes, 0, 4);
+
+	if (magicAt(bytes, 4, 4) === 'ftyp') return mp4Duration(bytes);
+	if (magic4 === 'fLaC') return flacDuration(bytes);
+	// Ogg (Vorbis/Opus) keeps its length in the final page; estimating from
+	// bitrate would be a guess, so let the browser probe it.
+	if (magic4 === 'OggS') return null;
+	if (magicAt(bytes, 0, 3) === 'ID3' || looksLikeMpeg(bytes)) return mp3Duration(bytes, totalBytes);
+	return null;
+}
+
 /** Duration in seconds for a replay URL, or null when it can't be determined. */
 export async function getReplayDuration(
 	platform: App.Platform | undefined,
@@ -156,7 +226,7 @@ export async function getReplayDuration(
 	if (!trackId) return null;
 
 	const cache = platform?.caches?.default as unknown as EdgeCache | undefined;
-	const cacheKey = `https://vr-replay-duration.internal/v2/${trackId}`;
+	const cacheKey = `https://vr-replay-duration.internal/v3/${trackId}`;
 	if (cache) {
 		const hit = await cache.match(cacheKey);
 		if (hit) {
@@ -182,8 +252,7 @@ export async function getReplayDuration(
 		const totalMatch = contentRange.match(/\/(\d+)$/);
 		const totalBytes = totalMatch ? Number(totalMatch[1]) : null;
 
-		const isMp4 = String.fromCharCode(...new Uint8Array(buffer, 4, 4)) === 'ftyp';
-		const duration = isMp4 ? mp4Duration(view) : mp3Duration(view, totalBytes);
+		const duration = durationForContainer(view, totalBytes);
 
 		const clean =
 			duration && Number.isFinite(duration) && duration > 0 ? Math.round(duration * 10) / 10 : null;
