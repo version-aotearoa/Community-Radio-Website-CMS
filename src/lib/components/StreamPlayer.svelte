@@ -248,8 +248,6 @@
 	});
 
 	let prevKey = 'live';
-	/** Set while a switch to a media source still owes a play() after seeking. */
-	let pendingPlay = false;
 	/** Where the last seek asked to land, for a single corrective re-seek. */
 	let lastSeekTarget: number | null = null;
 	let seekCorrections = 0;
@@ -271,17 +269,15 @@
 			seekCorrections = 0;
 			audioEl.src = p.url;
 			setLoading(true, 'switch:media');
-			// A cue start is applied once the duration is known. Playing from 0
-			// first makes the browser fetch the wrong range and can land a few
-			// seconds off, which is what made the same cue start inconsistently.
-			pendingPlay = true;
-			if (pendingSeek === null) {
-				pendingPlay = false;
-				audioEl.play().catch(() => {
-					setLoading(false, 'play-rejected:switch-media');
-					playbackBlocked.set(true);
-				});
-			}
+			// The element is preload="none", so nothing is fetched until play() or
+			// load() runs. Play immediately (inside the click's gesture) and let
+			// applyPendingSeek() apply the cue offset once metadata arrives —
+			// waiting for metadata without play()/load() deadlocks: no fetch, no
+			// loadedmetadata, no playback.
+			audioEl.play().catch(() => {
+				setLoading(false, 'play-rejected:switch-media');
+				playbackBlocked.set(true);
+			});
 		} else {
 			stopMedia();
 			initLiveEngine();
@@ -610,13 +606,6 @@
 		if (!Number.isFinite(duration) || duration <= 0) return;
 		seekTo(pendingSeek);
 		pendingSeek = null;
-		if (pendingPlay) {
-			pendingPlay = false;
-			audioEl.play().catch(() => {
-				setLoading(false, 'play-rejected:pending-seek');
-				playbackBlocked.set(true);
-			});
-		}
 	}
 
 	function trackText() {
