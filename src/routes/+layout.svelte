@@ -2,7 +2,7 @@
 	import { WillowDark } from '@svar-ui/svelte-core';
 	import { onMount } from 'svelte';
 	import { slide, fade } from 'svelte/transition';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidateAll, replaceState } from '$app/navigation';
 	import { page, updated } from '$app/state';
 	import StreamPlayer from '$lib/components/StreamPlayer.svelte';
 	import InstallPrompt from '$lib/components/InstallPrompt.svelte';
@@ -23,6 +23,36 @@
 	const user = $derived(page.data.user);
 	let menuOpen = $state(false);
 	let buildId = $state<string | null>(null);
+
+	/* hooks.server.ts bounces page 404s to `/?missing=<path>`, which the root
+	   layout load reads server-side. The notice renders with the page as a modal:
+	   a dead link needs an explanation, not a toast that slides away. */
+	let missingPath = $state<string | null>(page.data.missing ?? null);
+	let missingDialog: HTMLDialogElement | undefined = $state();
+
+	$effect(() => {
+		const notice = page.data.missing;
+		if (notice) missingPath = notice;
+	});
+
+	$effect(() => {
+		if (!missingPath) return;
+		// showModal() puts it in the top layer: focus trap, backdrop and Esc for
+		// free, and it works even when the notice arrived by client navigation.
+		if (missingDialog && !missingDialog.open) missingDialog.showModal();
+	});
+
+	/** Hide the notice and clean the URL (safe here: the router is initialised). */
+	function clearNotice() {
+		missingPath = null;
+		if (missingDialog?.open) missingDialog.close();
+		if (!page.url.searchParams.has('missing')) return;
+		try {
+			replaceState(page.url.pathname + page.url.hash, page.state);
+		} catch {
+			// Cosmetic only: the notice is already gone if this fails.
+		}
+	}
 
 	/* Phones held in landscape get a blocking "rotate your device" notice.
 	   Derived from the PHYSICAL screen, never the viewport: on Chrome/Brave/
@@ -304,6 +334,35 @@
 	<span class="mono">Version Radio is built for portrait</span>
 </div>
 
+{#if missingPath}
+	<dialog
+		bind:this={missingDialog}
+		class="missing-modal"
+		aria-labelledby="missing-title"
+		aria-describedby="missing-desc"
+		onclose={clearNotice}
+		onclick={(e) => {
+			if (e.target === e.currentTarget) missingDialog?.close();
+		}}
+	>
+		<div class="missing-modal-inner">
+			<span class="missing-kicker mono">404 · Off air</span>
+			<h2 id="missing-title">That page isn't here</h2>
+			<p id="missing-desc" class="missing-copy">
+				The link you followed doesn't exist. It may have been renamed, moved, or never been
+				there at all — so you're on the homepage instead.
+			</p>
+			<p class="missing-path mono">{missingPath}</p>
+			<div class="missing-actions">
+				<a class="missing-link" href="/shows">Browse shows</a>
+				<button class="missing-ok" type="button" onclick={() => missingDialog?.close()}>
+					OK
+				</button>
+			</div>
+		</div>
+	</dialog>
+{/if}
+
 <style>
 	.shell {
 		min-height: 100vh;
@@ -329,6 +388,93 @@
 		color: var(--vr-text);
 		font-size: 0.85rem;
 		box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+	}
+
+	/* 404 notice: native <dialog> (top layer gives focus trap, backdrop and Esc). */
+	.missing-modal {
+		border: 1px solid var(--vr-line);
+		background: var(--vr-surface);
+		color: var(--vr-text);
+		padding: 0;
+		margin: auto;
+		width: min(28rem, calc(100vw - 2rem));
+	}
+
+	.missing-modal::backdrop {
+		background: rgba(0, 0, 0, 0.72);
+		backdrop-filter: blur(2px);
+		-webkit-backdrop-filter: blur(2px);
+	}
+
+	.missing-modal-inner {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		padding: 1.5rem;
+	}
+
+	.missing-kicker {
+		font-size: 0.7rem;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--vr-faint);
+	}
+
+	.missing-modal h2 {
+		margin: 0;
+		font-family: var(--vr-font-headline);
+		font-size: clamp(1.5rem, 5vw, 2rem);
+		font-weight: 400;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.missing-copy {
+		margin: 0;
+		color: var(--vr-muted);
+		font-size: 0.95rem;
+		line-height: 1.5;
+	}
+
+	.missing-path {
+		margin: 0;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid var(--vr-line-muted);
+		background: var(--vr-bg-deep);
+		color: var(--vr-faint);
+		font-size: 0.8rem;
+		word-break: break-all;
+	}
+
+	.missing-actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: 0.5rem;
+	}
+
+	.missing-link {
+		color: var(--vr-text);
+		font-family: var(--vr-font-mono);
+		font-size: 0.8rem;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.missing-ok {
+		border: 1px solid var(--vr-line);
+		background: var(--vr-text);
+		color: var(--vr-bg);
+		font: inherit;
+		padding: 0.4rem 1.5rem;
+		cursor: pointer;
+	}
+
+	.missing-ok:hover,
+	.missing-ok:focus-visible {
+		background: var(--vr-bg);
+		color: var(--vr-text);
 	}
 
 	.update-refresh {
