@@ -1,0 +1,7 @@
+# Cloudflare Pages redirects (parsed at the edge; sources are excluded from the
+# Worker via _routes.json by @sveltejs/adapter-cloudflare).
+# Format: <source> <destination> [code] — static paths only, no :params.
+
+# Episode URL update: Version Excursions, 11 Nov 2026
+/shows/version-excursions/vx-11-26  /shows/version-excursions/vx-11-11-26  301
+/shows/version-excursions/vx-11-26/ /shows/version-excursions/vx-11-11-26  301
