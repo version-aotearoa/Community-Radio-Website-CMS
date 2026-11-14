@@ -7,6 +7,7 @@
 		playback,
 		advancePlayQueue,
 		playbackBlocked,
+		playQueue,
 		playerCollapse,
 		playerPosition,
 		playerRequest,
@@ -14,7 +15,8 @@
 		playerSet,
 		previousPlayQueue,
 		requestPlay,
-		streamPlaying
+		streamPlaying,
+		type MediaSource
 	} from '$lib/stores/player';
 	import { live, startLivePolling } from '$lib/stores/live';
 	import { liveArtOf } from '$lib/api/live';
@@ -39,6 +41,12 @@
 	let duration = $state(NaN);
 	/** Cue marker waiting for the recording's metadata before it can be applied. */
 	let pendingSeek: number | null = null;
+	/** Playhead to restore (not play) when a persisted episode is re-opened. */
+	let restoreAt: number | null = null;
+	/** True while a pause we initiated (in-app or media-session) is in flight. */
+	let userPaused = false;
+	/** True when playback stopped because the browser/OS took the audio away. */
+	let interrupted = false;
 
 	// TEMPORARY loading-trace debug ring (Safari phantom-stall investigation).
 	// Exposed as window.__vrPlayerDebug; strip once the culprit is confirmed.
@@ -150,11 +158,83 @@
 	// line above the "On air: <show>" link would duplicate it — drop it then.
 	const onAirLine = $derived(!mediaMode && !isLive && !!showLink);
 
-	// ---- iOS lock-screen / notification metadata (Media Session, metadata-only) ----
-	// No seek actions and no setPositionState: live has no finite timeline and
-	// the HANDOVER cautions to re-verify background audio after any re-enable.
+	// ---- iOS lock-screen / notification metadata (Media Session) ----
+	// Live has no finite timeline, so position state and seek actions are only
+	// published for recordings (mediaMode). The HANDOVER cautions to re-verify
+	// background audio after any change here (iOS: service-worker control is the
+	// historical audio-death regressor).
 	const hasMediaSession =
 		typeof navigator !== 'undefined' && 'mediaSession' in navigator && typeof MediaMetadata !== 'undefined';
+
+	/** Bumped to force the metadata effect to re-publish (see reassertSession). */
+	let sessionTick = $state(0);
+
+	/** Safari throws for actions it does not implement — never let that abort setup. */
+	function setSessionHandler(
+		action: MediaSessionAction,
+		handler: ((details: MediaSessionActionDetails) => void) | null
+	) {
+		if (!hasMediaSession) return;
+		try {
+			navigator.mediaSession.setActionHandler(action, handler);
+		} catch {
+			// unsupported action on this browser: leave it unregistered
+		}
+	}
+
+	let lastPositionPush = 0;
+
+	/** Lock-screen / Now Playing playhead for recordings. Live: not applicable. */
+	function pushPositionState(force = false) {
+		if (!hasMediaSession || !mediaMode || !audioEl) return;
+		const total = Number.isFinite(audioEl.duration) ? audioEl.duration : duration;
+		if (!Number.isFinite(total) || total <= 0) return;
+
+		const now = performance.now();
+		if (!force && now - lastPositionPush < 1000) return;
+		lastPositionPush = now;
+
+		const position = Math.max(
+			0,
+			Math.min(Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0, total)
+		);
+		try {
+			navigator.mediaSession.setPositionState({
+				duration: total,
+				// Zero is rejected by the spec; a paused element still reports its rate.
+				playbackRate: audioEl.playbackRate > 0 ? audioEl.playbackRate : 1,
+				position
+			});
+		} catch {
+			// older Safari: no position state, everything else still works
+		}
+	}
+
+	function clearPositionState() {
+		if (!hasMediaSession) return;
+		try {
+			navigator.mediaSession.setPositionState();
+		} catch {
+			// ignore
+		}
+	}
+
+	/**
+	 * Re-publish the session after another tab stole it while we were hidden.
+	 * Safari routes headset/lock-screen buttons to the most recent session; a
+	 * fresh metadata + state push puts us back in the Now Playing list, so the
+	 * next press reaches Version Radio instead of the other tab.
+	 */
+	function reassertSession() {
+		if (!hasMediaSession) return;
+		sessionTick += 1;
+		try {
+			navigator.mediaSession.playbackState = $streamPlaying ? 'playing' : 'paused';
+		} catch {
+			// best effort
+		}
+		pushPositionState(true);
+	}
 
 	$effect(() => {
 		if (!hasMediaSession) return;
@@ -167,6 +247,7 @@
 		$playback;
 		$live;
 		artSource;
+		sessionTick; // re-publish on demand (reassertSession)
 		let title = 'Version Radio';
 		let artist = '';
 		if (media) {
@@ -198,6 +279,18 @@
 		} catch {
 			// metadata is best-effort
 		}
+	});
+
+	let queueRegistered = false;
+
+	$effect(() => {
+		// Only advertise next/previous when there is a queue to move through:
+		// otherwise Safari/Android show dead skip buttons on the lock screen.
+		const hasQueue = $playQueue.length > 0;
+		if (hasQueue === queueRegistered) return;
+		queueRegistered = hasQueue;
+		setSessionHandler('nexttrack', hasQueue ? () => void advancePlayQueue() : null);
+		setSessionHandler('previoustrack', hasQueue ? () => void previousPlayQueue() : null);
 	});
 
 	$effect(() => {
@@ -259,7 +352,11 @@
 		prevKey = key;
 		duration = NaN;
 		// A recording may start at a cue marker (`startAt`); live never does.
-		const startAt = p.kind === 'media' ? (p.startAt ?? null) : null;
+		// A persisted episode resumes from its saved playhead instead — loaded
+		// and positioned, but not started (see restorePersistedEpisode).
+		const restoring = p.kind === 'media' && restoreAt !== null;
+		const startAt = p.kind === 'media' ? (restoreAt ?? p.startAt ?? null) : null;
+		restoreAt = null;
 		pendingSeek = startAt;
 		// Show the requested offset straight away: a deep link or cue click should
 		// put the playhead where it will start, even while metadata is loading or
@@ -277,18 +374,29 @@
 			lastSeekTarget = null;
 			seekCorrections = 0;
 			audioEl.src = p.url;
-			setLoading(true, 'switch:media');
-			// The element is preload="none", so nothing is fetched until play() or
-			// load() runs. Play immediately (inside the click's gesture) and let
-			// applyPendingSeek() apply the cue offset once metadata arrives —
-			// waiting for metadata without play()/load() deadlocks: no fetch, no
-			// loadedmetadata, no playback.
-			audioEl.play().catch(() => {
-				setLoading(false, 'play-rejected:switch-media');
-				playbackBlocked.set(true);
-			});
+			if (restoring) {
+				// Re-opening a discarded tab (Safari): fetch metadata, land the
+				// playhead on the saved spot and stay paused. Autoplay policy would
+				// reject play() on a cold load anyway, and starting without a tap
+				// would be a surprise.
+				setLoading(false, 'restore:paused');
+				audioEl.load();
+			} else {
+				setLoading(true, 'switch:media');
+				// The element is preload="none", so nothing is fetched until play() or
+				// load() runs. Play immediately (inside the click's gesture) and let
+				// applyPendingSeek() apply the cue offset once metadata arrives —
+				// waiting for metadata without play()/load() deadlocks: no fetch, no
+				// loadedmetadata, no playback.
+				audioEl.play().catch(() => {
+					setLoading(false, 'play-rejected:switch-media');
+					playbackBlocked.set(true);
+				});
+			}
 		} else {
 			stopMedia();
+			clearResumeState();
+			clearPositionState();
 			initLiveEngine();
 			setLoading(true, 'switch:live');
 			audioEl.play().catch(() => setLoading(false, 'play-rejected:switch-live'));
@@ -358,13 +466,48 @@
 		});
 	}
 
+	/**
+	 * Re-attach the recording if the browser dropped it. Safari releases media
+	 * resources for discarded/backgrounded tabs, leaving an element with no
+	 * source (or a media error) even though our state still points at an episode.
+	 */
+	function repairMediaSource() {
+		if (!audioEl || !media) return;
+		const lost =
+			!audioEl.src ||
+			audioEl.error !== null ||
+			audioEl.networkState === HTMLMediaElement.NETWORK_NO_SOURCE;
+		if (!lost) return;
+
+		const resumeAt =
+			pendingSeek ?? (Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : currentTime);
+		pendingSeek = resumeAt > 0 ? resumeAt : null;
+		audioEl.src = media.url;
+		audioEl.load();
+		setLoading(true, 'repair:media');
+	}
+
+	/** Start (or resume) the loaded recording, surviving a dropped source. */
+	async function playMediaElement(reason: string) {
+		if (!audioEl) return;
+		repairMediaSource();
+		setLoading(true, reason);
+		try {
+			await audioEl.play();
+		} catch {
+			// Autoplay/interruption refusal: surface it instead of dying quietly.
+			setLoading(false, `play-rejected:${reason}`);
+			playbackBlocked.set(true);
+		}
+	}
+
 	async function togglePlay() {
 		if (!audioEl) return;
 		if (mediaMode) {
 			if (audioEl.paused) {
-				setLoading(true, 'play-start:media');
-				await audioEl.play().catch(() => setLoading(false, 'play-rejected:media'));
+				await playMediaElement('play-start:media');
 			} else {
+				userPaused = true;
 				audioEl.pause();
 			}
 			return;
@@ -374,6 +517,7 @@
 			setLoading(true, 'play-start:live');
 			await audioEl.play().catch(() => setLoading(false, 'play-rejected:live'));
 		} else {
+			userPaused = true;
 			audioEl.pause();
 		}
 	}
@@ -383,10 +527,7 @@
 		if (!audioEl) return;
 		if (play) {
 			if (mediaMode) {
-				if (audioEl.paused) {
-					setLoading(true, 'set:play:media');
-					await audioEl.play().catch(() => setLoading(false, 'play-rejected:set-media'));
-				}
+				if (audioEl.paused) await playMediaElement('set:play:media');
 			} else {
 				await initLiveEngine();
 				if (audioEl.paused) {
@@ -395,8 +536,16 @@
 				}
 			}
 		} else if (!audioEl.paused) {
+			userPaused = true;
 			audioEl.pause();
 		}
+	}
+
+	/** Relative seek used by headset/lock-screen skip buttons (recordings only). */
+	function seekRelative(seconds: number) {
+		if (!mediaMode || !audioEl) return;
+		const from = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : currentTime;
+		seekTo(from + seconds);
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -471,9 +620,34 @@
 	}
 
 	function onVisibilityChange() {
-		if (document.visibilityState === 'visible' && audioEl && !audioEl.paused && audioEl.readyState >= 3) {
+		if (document.visibilityState !== 'visible') return;
+
+		// Back in the tab: re-advertise ourselves so the next headset press can
+		// come here, then pick up where the interruption left off. `$streamPlaying`
+		// catches browsers that pause us without firing a usable pause event.
+		reassertSession();
+		if (mediaMode && audioEl?.paused && (interrupted || $streamPlaying)) {
+			interrupted = false;
+			void applyPlaying(true);
+		}
+
+		if (audioEl && !audioEl.paused && audioEl.readyState >= 3) {
 			setLoading(false, 'event:visibility');
 		}
+	}
+
+	function onPageShow(event: PageTransitionEvent) {
+		// bfcache restore: the element comes back paused even though nothing was
+		// user-paused, so treat it like an interruption.
+		reassertSession();
+		if (event.persisted && mediaMode && audioEl?.paused && (interrupted || $streamPlaying)) {
+			interrupted = false;
+			void applyPlaying(true);
+		}
+	}
+
+	function onWindowFocus() {
+		reassertSession();
 	}
 
 	onMount(() => {
@@ -487,13 +661,22 @@
 			audioEl.addEventListener('playing', () => {
 				streamPlaying.set(true);
 				playbackBlocked.set(false);
+				userPaused = false;
+				interrupted = false;
 				setLoading(false, 'event:playing');
 				clearStallWatchdog();
 			});
 			audioEl.addEventListener('pause', () => {
+				// A pause we didn't ask for means Safari/the OS took the audio away
+				// (another tab, a call, the screen locking). Remember that so we can
+				// resume when the listener comes back, rather than making them
+				// restart the episode.
+				interrupted = !userPaused;
+				userPaused = false;
 				streamPlaying.set(false);
 				setLoading(false, 'event:pause');
 				clearStallWatchdog();
+				saveResumeState();
 			});
 			audioEl.addEventListener('ended', () => {
 				// Reset on finish so state is accurate and a replay starts at 0.
@@ -529,6 +712,8 @@
 						seconds: currentTime,
 						duration: Number.isFinite(duration) ? duration : 0
 					});
+					pushPositionState();
+					saveResumeStateSoon();
 				}
 				setLoading(false, 'event:timeupdate');
 				clearStallWatchdog();
@@ -536,36 +721,54 @@
 			audioEl.addEventListener('loadedmetadata', () => {
 				duration = audioEl?.duration ?? NaN;
 				applyPendingSeek();
+				pushPositionState(true);
 			});
 			audioEl.addEventListener('durationchange', () => {
 				duration = audioEl?.duration ?? NaN;
 				applyPendingSeek();
+				pushPositionState(true);
 			});
 			audioEl.addEventListener('seeked', () => {
 				// Some demuxers land a little off the requested position. Correct
 				// once, then accept whatever the browser settled on.
-				if (lastSeekTarget === null || !audioEl) return;
-				if (Math.abs(audioEl.currentTime - lastSeekTarget) > 1.5 && seekCorrections < 1) {
-					seekCorrections += 1;
-					audioEl.currentTime = lastSeekTarget;
-					return;
+				if (lastSeekTarget !== null && audioEl) {
+					if (Math.abs(audioEl.currentTime - lastSeekTarget) > 1.5 && seekCorrections < 1) {
+						seekCorrections += 1;
+						audioEl.currentTime = lastSeekTarget;
+						return;
+					}
+					lastSeekTarget = null;
+					seekCorrections = 0;
 				}
-				lastSeekTarget = null;
-				seekCorrections = 0;
+				pushPositionState(true);
+				saveResumeState();
 			});
 		}
 		window.addEventListener('keydown', onKey);
 		document.addEventListener('visibilitychange', onVisibilityChange);
-		if (hasMediaSession) {
-			navigator.mediaSession.setActionHandler('play', () => {
-				if (audioEl?.paused) void togglePlay();
-			});
-			navigator.mediaSession.setActionHandler('pause', () => {
-				if (audioEl && !audioEl.paused) void togglePlay();
-			});
-			navigator.mediaSession.setActionHandler('nexttrack', () => void advancePlayQueue());
-			navigator.mediaSession.setActionHandler('previoustrack', () => void previousPlayQueue());
-		}
+		window.addEventListener('pageshow', onPageShow);
+		window.addEventListener('focus', onWindowFocus);
+
+		// Remote controls: intent-based (so a desynced element recovers), plus the
+		// episode seek actions Safari/Android expose on the lock screen.
+		setSessionHandler('play', () => void applyPlaying(true));
+		setSessionHandler('pause', () => void applyPlaying(false));
+		setSessionHandler('stop', () => void applyPlaying(false));
+		setSessionHandler('seekbackward', (details) => {
+			const offset = Math.abs(details.seekOffset ?? 0);
+			seekRelative(-(offset > 0 ? offset : 15));
+		});
+		setSessionHandler('seekforward', (details) => {
+			const offset = Math.abs(details.seekOffset ?? 0);
+			seekRelative(offset > 0 ? offset : 15);
+		});
+		setSessionHandler('seekto', (details) => {
+			if (typeof details.seekTime === 'number') seekTo(details.seekTime);
+		});
+
+		// A discarded tab reloads with empty stores: put the episode back.
+		restorePersistedEpisode();
+
 		if ($autoplay && !mediaMode) togglePlay();
 	});
 
@@ -573,14 +776,22 @@
 		hls?.destroy();
 		audioEl?.pause();
 		clearStallWatchdog();
-		if (hasMediaSession) {
-			navigator.mediaSession.setActionHandler('play', null);
-			navigator.mediaSession.setActionHandler('pause', null);
-			navigator.mediaSession.setActionHandler('nexttrack', null);
-			navigator.mediaSession.setActionHandler('previoustrack', null);
+		for (const action of [
+			'play',
+			'pause',
+			'stop',
+			'seekbackward',
+			'seekforward',
+			'seekto',
+			'nexttrack',
+			'previoustrack'
+		] as MediaSessionAction[]) {
+			setSessionHandler(action, null);
 		}
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('keydown', onKey);
+			window.removeEventListener('pageshow', onPageShow);
+			window.removeEventListener('focus', onWindowFocus);
 			document.removeEventListener('visibilitychange', onVisibilityChange);
 			delete (window as unknown as Record<string, unknown>).__vrPlayerDebug;
 		}
@@ -615,6 +826,98 @@
 		if (!Number.isFinite(duration) || duration <= 0) return;
 		seekTo(pendingSeek);
 		pendingSeek = null;
+	}
+
+	// ---- Session persistence (Safari discards tabs far more eagerly than Chrome) ----
+	// A paused episode can lose its page entirely; the in-memory stores go with it
+	// and the listener is left with an empty player ("I have to restart it"). Keep
+	// the episode and its playhead in sessionStorage so returning to the tab puts
+	// it back, loaded and paused where it stopped.
+	const RESUME_KEY = 'vr-player-resume';
+	const RESUME_MAX_AGE = 12 * 60 * 60 * 1000;
+	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function saveResumeState() {
+		if (typeof sessionStorage === 'undefined') return;
+		const source = $playback;
+		if (source.kind !== 'media' || !audioEl) return;
+
+		const position = audioEl.currentTime;
+		if (!Number.isFinite(position) || position < 1) return;
+
+		try {
+			sessionStorage.setItem(
+				RESUME_KEY,
+				JSON.stringify({
+					source: {
+						url: source.url,
+						title: source.title,
+						artist: source.artist,
+						art: source.art,
+						show: source.show ?? null,
+						href: source.href ?? null,
+						broadcastId: source.broadcastId ?? null,
+						date: source.date ?? null
+					},
+					position,
+					savedAt: Date.now()
+				})
+			);
+		} catch {
+			// Private browsing / quota: persistence is best-effort.
+		}
+	}
+
+	/** Throttled save for `timeupdate` (every ~2s is plenty to survive a discard). */
+	function saveResumeStateSoon() {
+		if (saveTimer) return;
+		saveTimer = setTimeout(() => {
+			saveTimer = null;
+			saveResumeState();
+		}, 2000);
+	}
+
+	function clearResumeState() {
+		if (typeof sessionStorage === 'undefined') return;
+		try {
+			sessionStorage.removeItem(RESUME_KEY);
+		} catch {
+			// ignore
+		}
+	}
+
+	function readResumeState(): { source: MediaSource; position: number } | null {
+		if (typeof sessionStorage === 'undefined') return null;
+		try {
+			const raw = sessionStorage.getItem(RESUME_KEY);
+			if (!raw) return null;
+			const saved = JSON.parse(raw) as {
+				source?: MediaSource;
+				position?: number;
+				savedAt?: number;
+			};
+			if (!saved.source?.url || typeof saved.position !== 'number') return null;
+			if (typeof saved.savedAt === 'number' && Date.now() - saved.savedAt > RESUME_MAX_AGE) {
+				clearResumeState();
+				return null;
+			}
+			return { source: saved.source, position: saved.position };
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Bring back the episode this tab was playing last time it lived, paused at
+	 * the same spot. The playback effect loads metadata and places the playhead
+	 * without calling play(), so no autoplay policy is involved.
+	 */
+	function restorePersistedEpisode() {
+		if ($playback.kind === 'media') return;
+		const saved = readResumeState();
+		if (!saved || saved.position < 5) return;
+		restoreAt = saved.position;
+		playback.set({ kind: 'media', ...saved.source });
 	}
 
 	function trackText() {
