@@ -39,6 +39,8 @@ declare global {
 
 		interface PageData {
 			user: App.Locals['user'];
+			/** One-shot notice: the path a 404 was bounced home from. */
+			missing?: string | null;
 		}
 	}
 
