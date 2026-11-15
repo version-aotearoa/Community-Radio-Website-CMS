@@ -66,6 +66,18 @@ export interface BandcampHints {
 	artist?: string | null;
 }
 
+/** A scored Bandcamp page candidate for a row that has no URL yet. */
+export interface BandcampMatch {
+	url: string;
+	title: string;
+	artist: string;
+	album: string;
+	bandId: number;
+	tralbumId: number;
+	/** 0–1: exact title + artist ≈ 1.0; shared words only ≈ 0.35. */
+	score: number;
+}
+
 export function isBandcampUrl(url: string): boolean {
 	try {
 		return HOST_RE.test(new URL(url).hostname);
@@ -99,6 +111,11 @@ interface SearchResult {
 	id?: number;
 	band_id?: number;
 	item_url_path?: string;
+	/** Track/album title (present on autocomplete results). */
+	name?: string;
+	/** Artist/band name (present on autocomplete results). */
+	band_name?: string;
+	album_name?: string;
 }
 
 interface TralbumTrack {
@@ -222,6 +239,78 @@ async function lookupIds(
 		}
 	}
 	return null;
+}
+
+/**
+ * Find Bandcamp page URLs for a row that only has artist + title (e.g. imported
+ * from a Serato playlist).
+ *
+ * Unlike `lookupIds()` there is no URL to match against, so results are scored
+ * on name/artist equality after normalisation and returned best-first for the
+ * DJ to confirm. Never throws; an empty array means "nothing convincing".
+ */
+export async function searchBandcampMatches(hints: BandcampHints): Promise<BandcampMatch[]> {
+	const title = hints.title?.trim() ?? '';
+	const artist = hints.artist?.trim() ?? '';
+	if (!title) return [];
+
+	const queries = [...new Set([`${title} ${artist}`.trim(), ascii(`${title} ${artist}`), title].filter(Boolean))];
+
+	const seen = new Map<string, BandcampMatch>();
+
+	for (const query of queries.slice(0, 2)) {
+		const results = await search(query, 't');
+		if (!results) continue;
+
+		for (const result of results) {
+			if (!result.item_url_path || !result.band_id || !result.id) continue;
+
+			const url = result.item_url_path.startsWith('http')
+				? result.item_url_path
+				: `https://bandcamp.com${result.item_url_path}`;
+
+			const name = result.name ?? '';
+			const band = result.band_name ?? '';
+			const score = scoreMatch(title, artist, name, band);
+			if (score < 0.3) continue;
+
+			const existing = seen.get(url);
+			if (!existing || existing.score < score) {
+				seen.set(url, {
+					url,
+					title: name,
+					artist: band,
+					album: result.album_name ?? '',
+					bandId: result.band_id,
+					tralbumId: result.id,
+					score
+				});
+			}
+		}
+
+		// A confident exact match is enough — don't spend the second query.
+		if ([...seen.values()].some((m) => m.score >= 0.95)) break;
+	}
+
+	return [...seen.values()].sort((a, b) => b.score - a.score).slice(0, 5);
+}
+
+function scoreMatch(title: string, artist: string, hitTitle: string, hitArtist: string): number {
+	const t = ascii(title);
+	const a = ascii(artist);
+	const ht = ascii(hitTitle);
+	const ha = ascii(hitArtist);
+
+	let score = 0;
+	if (t && ht) {
+		if (t === ht) score += 0.6;
+		else if (ht.includes(t) || t.includes(ht)) score += 0.35;
+	}
+	if (a && ha) {
+		if (a === ha) score += 0.4;
+		else if (ha.includes(a) || a.includes(ha)) score += 0.2;
+	}
+	return Math.min(1, Math.round(score * 100) / 100);
 }
 
 async function fetchDetails(
