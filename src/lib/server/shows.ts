@@ -22,6 +22,8 @@ export interface ShowRow {
 	paused_until: string | null;
 	/** YYYY-MM-DD the current break started. */
 	paused_at: string | null;
+	/** Serato playlist handle; the per-episode URL is derived from it. */
+	serato_user: string | null;
 	created_at: number;
 	updated_at: number;
 }

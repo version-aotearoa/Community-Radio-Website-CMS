@@ -82,6 +82,21 @@
 	let fileInput: HTMLInputElement | undefined = $state();
 	let activeTab = $state<'tracklist' | 'replay' | 'description' | 'episode'>('tracklist');
 
+	// ---- Serato import / Bandcamp matching ----
+	let seratoBusy = $state(false);
+	let seratoError = $state('');
+	let seratoNotice = $state('');
+	let seratoHandle = $state('');
+	let seratoUrlInput = $state('');
+	let showSeratoHandleField = $state(false);
+	let bandcampBusy = $state(false);
+	let bandcampNotice = $state('');
+
+	// Follow the show's saved handle when fresh server data arrives.
+	$effect(() => {
+		seratoHandle = show.serato_user ?? '';
+	});
+
 	// Sync the replay/description/slug form fields whenever the broadcast prop
 	// changes (fresh server data after a save or navigation).
 	$effect(() => {
@@ -328,6 +343,174 @@
 		e.preventDefault();
 		e.stopPropagation();
 		gridApi.exec('close-editor', {}).catch(() => {});
+	}
+
+	/** Normalised key for duplicate detection during a Serato import. */
+	function rowKey(mark: string, title: string, artist: string): string {
+		const norm = (s: string) =>
+			s
+				.toLowerCase()
+				.normalize('NFD')
+				.replace(/[\u0300-\u036f]/g, '')
+				.replace(/[^a-z0-9]+/g, ' ')
+				.trim();
+		return `${mark.trim()}|${norm(title)}|${norm(artist)}`;
+	}
+
+	/** Import the DJ's published Serato playlist for this episode. */
+	async function importSerato() {
+		seratoError = '';
+		seratoNotice = '';
+		seratoBusy = true;
+
+		try {
+			const query = seratoUrlInput.trim() ? `?url=${encodeURIComponent(seratoUrlInput.trim())}` : '';
+			const res = await fetch(
+				`/api/shows/${show.id}/broadcasts/${broadcast.id}/serato${query}`
+			);
+			const body = (await res.json().catch(() => ({}))) as {
+				status?: string;
+				tracks?: Array<{
+					markSeconds: number | null;
+					artist: string;
+					title: string;
+				}>;
+				handle?: string | null;
+				tried?: string[];
+				detail?: string;
+				error?: string;
+			};
+
+			if (!res.ok) {
+				seratoError = body.error ?? 'Serato import failed.';
+				return;
+			}
+
+			if (body.status === 'no-handle') {
+				showSeratoHandleField = true;
+				seratoError = 'Set your Serato handle first — it is on your playlist URL.';
+				return;
+			}
+
+			if (body.status === 'not-published') {
+				seratoError = `No Serato playlist published for ${broadcast.date} yet.`;
+				return;
+			}
+
+			if (body.status === 'no-tracks') {
+				seratoError = 'Serato returned the page but no tracks could be read.';
+				return;
+			}
+
+			if (body.status === 'upstream') {
+				seratoError = `Serato could not be read: ${body.detail ?? 'unknown error'}`;
+				return;
+			}
+
+			const parsed = body.tracks ?? [];
+			if (parsed.length === 0) {
+				seratoError = 'The playlist is empty.';
+				return;
+			}
+
+			const existing = new Set(
+				(gridApi?.getState().data ?? []).map((r: any) =>
+					rowKey(String(r.mark ?? ''), String(r.title ?? ''), String(r.artist ?? ''))
+				)
+			);
+
+			let position = (gridApi?.getState().data ?? []).length;
+			let added = 0;
+			for (const track of parsed) {
+				const mark = formatTrackTime(track.markSeconds ?? null);
+				const key = rowKey(mark, track.title, track.artist);
+				if (existing.has(key)) continue;
+				existing.add(key);
+
+				await gridApi.exec('add-row', {
+					row: {
+						id: crypto.randomUUID(),
+						position: ++position,
+						mark,
+						title: track.title,
+						artist: track.artist,
+						album: '',
+						url: ''
+					},
+					after: null
+				});
+				added += 1;
+			}
+
+			renumber();
+			const skipped = parsed.length - added;
+			seratoNotice = `${added} track${added === 1 ? '' : 's'} added${
+				skipped > 0 ? `, ${skipped} already present` : ''
+			}.`;
+		} catch {
+			seratoError = 'Serato import failed.';
+		} finally {
+			seratoBusy = false;
+		}
+	}
+
+	/** Save the show's Serato handle (used to derive each episode's URL). */
+	async function saveSeratoHandle() {
+		seratoError = '';
+		seratoNotice = '';
+		const res = await fetch(`/api/shows/${show.id}/serato`, {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ seratoUser: seratoHandle.trim() })
+		});
+		const body = (await res.json().catch(() => ({}))) as { seratoUser?: string | null; error?: string };
+		if (!res.ok) {
+			seratoError = body.error ?? 'Could not save the handle.';
+			return;
+		}
+		seratoHandle = body.seratoUser ?? '';
+		showSeratoHandleField = false;
+		seratoNotice = seratoHandle ? `Serato handle saved (${seratoHandle}).` : 'Serato handle cleared.';
+	}
+
+	/**
+	 * Fill Bandcamp links for rows that don't have one.
+	 *
+	 * Sequential and capped: this hits Bandcamp's undocumented public search API
+	 * once per row, so it stays polite and bounded.
+	 */
+	async function findBandcampLinks() {
+		bandcampBusy = true;
+		bandcampNotice = '';
+		const rows: any[] = gridApi?.getState().data ?? [];
+		const pending = rows.filter((r) => !String(r.url ?? '').trim()).slice(0, 40);
+
+		let filled = 0;
+		for (const row of pending) {
+			try {
+				const res = await fetch('/api/bandcamp/match', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ artist: row.artist ?? '', title: row.title ?? '' })
+				});
+				if (!res.ok) continue;
+				const body = (await res.json()) as {
+					matches?: Array<{ url: string; score: number; title: string; artist: string }>;
+				};
+				const best = body.matches?.[0];
+				if (!best || best.score < 0.75) continue;
+				await gridApi?.exec('update-row', { id: row.id, row: { url: best.url } });
+				filled += 1;
+			} catch {
+				// keep going: one failed lookup must not abort the pass
+			}
+			await new Promise((resolve) => setTimeout(resolve, 150));
+		}
+
+		bandcampNotice = filled
+			? `${filled} Bandcamp link${filled === 1 ? '' : 's'} matched (best-guess — check before saving).`
+			: 'No confident Bandcamp matches found.';
+		bandcampBusy = false;
 	}
 
 	async function onCsvPicked(el: HTMLInputElement) {
@@ -878,12 +1061,55 @@
 	<div class="tracklist-actions">
 		<Button css="vr-cta ghost" onclick={() => fileInput?.click()}>Import CSV</Button>
 		<Button css="vr-cta ghost" onclick={exportCsv}>Export CSV</Button>
+		<Button css="vr-cta ghost" disabled={seratoBusy} onclick={importSerato}>
+			{seratoBusy ? 'Reading Serato…' : 'Import from Serato'}
+		</Button>
+		<Button css="vr-cta ghost" disabled={bandcampBusy} onclick={findBandcampLinks}>
+			{bandcampBusy ? 'Matching Bandcamp…' : 'Find Bandcamp links'}
+		</Button>
 		<Button css="vr-cta ghost" onclick={addTrack}>+ Add track</Button>
 		<Button css="vr-cta ghost" onclick={deleteSelected}>Delete selected</Button>
 		<Button css="vr-cta" type="primary" disabled={saving} onclick={save}>
 			{saving ? 'Saving…' : 'Save tracklist'}
 		</Button>
 	</div>
+
+	<div class="serato-row">
+		<label for="serato-handle">Serato handle</label>
+		<input
+			id="serato-handle"
+			type="text"
+			placeholder="e.g. Version_Excursions"
+			bind:value={seratoHandle}
+			onkeydown={(e) => e.key === 'Enter' && saveSeratoHandle()}
+		/>
+		<Button css="vr-cta ghost" onclick={saveSeratoHandle}>Save handle</Button>
+	</div>
+	{#if showSeratoHandleField}
+		<p class="hint">
+			Your playlist URL looks like <code>serato.com/playlists/&lt;handle&gt;/&lt;date&gt;</code> — the
+			middle part is the handle. It stays on the show, so every episode derives its own URL.
+		</p>
+	{/if}
+	<div class="serato-row">
+		<label for="serato-url">Or paste a playlist URL</label>
+		<input
+			id="serato-url"
+			type="url"
+			placeholder="https://serato.com/playlists/…"
+			bind:value={seratoUrlInput}
+			onkeydown={(e) => e.key === 'Enter' && importSerato()}
+		/>
+	</div>
+	{#if seratoError}
+		<p class="replay-msg bad">{seratoError}</p>
+	{/if}
+	{#if seratoNotice}
+		<p class="replay-msg ok">{seratoNotice}</p>
+	{/if}
+	{#if bandcampNotice}
+		<p class="replay-msg ok">{bandcampNotice}</p>
+	{/if}
 
 	{#if error}
 		<div class="notice bad">{error}</div>
@@ -1021,6 +1247,39 @@
 		gap: 0.5rem;
 		flex-wrap: wrap;
 		margin: 0 0 0.5rem;
+	}
+
+	/* Serato import: handle + one-off URL. Kept quiet — most DJs set it once. */
+	.serato-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		margin: 0 0 0.5rem;
+	}
+
+	.serato-row label {
+		font-size: 0.75rem;
+		color: var(--vr-muted);
+		font-family: var(--vr-font-mono);
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	.serato-row input {
+		flex: 1 1 16rem;
+		min-width: 0;
+		background: var(--vr-bg-deep);
+		border: 1px solid var(--vr-line-muted);
+		color: var(--vr-text);
+		font: inherit;
+		font-size: 0.85rem;
+		padding: 0.4rem 0.55rem;
+	}
+
+	.serato-row input:focus-visible {
+		outline: 1px solid var(--vr-line);
+		outline-offset: 1px;
 	}
 
 	/* Replay preview: play/pause, ±5s / ±1 min, scrub — so cues can be stamped
