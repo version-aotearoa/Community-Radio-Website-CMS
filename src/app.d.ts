@@ -66,6 +66,8 @@ declare global {
 		TURNSTILE_SECRET?: string;
 		TURNSTILE_HOSTNAMES?: string;
 		PUBLIC_TURNSTILE_SITE_KEY?: string;
+		/** Track Detect API key (admin-only tracklist fingerprinting). */
+		TRACK_DETECT_API_KEY?: string;
 	}
 
 	interface Window {

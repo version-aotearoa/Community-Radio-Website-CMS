@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Grid, WillowDark } from '@svar-ui/svelte-grid';
 	import { Button } from '@svar-ui/svelte-core';
 	import { get } from 'svelte/store';
@@ -86,15 +87,23 @@
 	let seratoBusy = $state(false);
 	let seratoError = $state('');
 	let seratoNotice = $state('');
-	let seratoHandle = $state('');
-	let seratoUrlInput = $state('');
-	let showSeratoHandleField = $state(false);
+	let seratoUrl = $state('');
+	let seratoSaving = $state(false);
 	let bandcampBusy = $state(false);
 	let bandcampNotice = $state('');
 
-	// Follow the show's saved handle when fresh server data arrives.
+	// ---- Track Detect (admin trial) ----
+	const isAdmin = $derived(page.data.user?.role === 'admin');
+	let detectBusy = $state(false);
+	let detectError = $state('');
+	let detectNotice = $state('');
+	let detectStatus = $state<string | null>(null);
+	let detectProgress = $state<number | null>(null);
+	let detectTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Follow the episode's saved Serato playlist URL when fresh data arrives.
 	$effect(() => {
-		seratoHandle = show.serato_user ?? '';
+		seratoUrl = broadcast.serato_url ?? '';
 	});
 
 	// Sync the replay/description/slug form fields whenever the broadcast prop
@@ -357,6 +366,48 @@
 		return `${mark.trim()}|${norm(title)}|${norm(artist)}`;
 	}
 
+	/**
+	 * Append imported rows to the grid, skipping ones already present (matched on
+	 * time + title + artist). Used by the Serato and Track Detect imports so both
+	 * behave the same and neither disturbs existing rows.
+	 */
+	async function appendImportedRows(
+		rows: Array<{ markSeconds: number | null; artist: string; title: string; url?: string | null }>
+	): Promise<{ added: number; skipped: number }> {
+		const existing = new Set(
+			(gridApi?.getState().data ?? []).map((r: any) =>
+				rowKey(String(r.mark ?? ''), String(r.title ?? ''), String(r.artist ?? ''))
+			)
+		);
+
+		let position = (gridApi?.getState().data ?? []).length;
+		let added = 0;
+
+		for (const row of rows) {
+			const mark = formatTrackTime(row.markSeconds ?? null);
+			const key = rowKey(mark, row.title, row.artist);
+			if (existing.has(key)) continue;
+			existing.add(key);
+
+			await gridApi.exec('add-row', {
+				row: {
+					id: crypto.randomUUID(),
+					position: ++position,
+					mark,
+					title: row.title,
+					artist: row.artist,
+					album: '',
+					url: row.url ?? ''
+				},
+				after: null
+			});
+			added += 1;
+		}
+
+		renumber();
+		return { added, skipped: rows.length - added };
+	}
+
 	/** Import the DJ's published Serato playlist for this episode. */
 	async function importSerato() {
 		seratoError = '';
@@ -364,19 +415,24 @@
 		seratoBusy = true;
 
 		try {
-			const query = seratoUrlInput.trim() ? `?url=${encodeURIComponent(seratoUrlInput.trim())}` : '';
+			const typed = seratoUrl.trim();
+			if (!typed && !broadcast.serato_url) {
+				seratoError = 'Paste the Serato playlist URL for this set first.';
+				return;
+			}
+
+			const query = typed ? `?url=${encodeURIComponent(typed)}` : '';
 			const res = await fetch(
 				`/api/shows/${show.id}/broadcasts/${broadcast.id}/serato${query}`
 			);
 			const body = (await res.json().catch(() => ({}))) as {
 				status?: string;
+				url?: string;
 				tracks?: Array<{
 					markSeconds: number | null;
 					artist: string;
 					title: string;
 				}>;
-				handle?: string | null;
-				tried?: string[];
 				detail?: string;
 				error?: string;
 			};
@@ -386,14 +442,13 @@
 				return;
 			}
 
-			if (body.status === 'no-handle') {
-				showSeratoHandleField = true;
-				seratoError = 'Set your Serato handle first — it is on your playlist URL.';
+			if (body.status === 'no-url') {
+				seratoError = 'Paste the Serato playlist URL for this set first.';
 				return;
 			}
 
 			if (body.status === 'not-published') {
-				seratoError = `No Serato playlist published for ${broadcast.date} yet.`;
+				seratoError = 'Serato has no playlist at that URL (yet).';
 				return;
 			}
 
@@ -413,37 +468,14 @@
 				return;
 			}
 
-			const existing = new Set(
-				(gridApi?.getState().data ?? []).map((r: any) =>
-					rowKey(String(r.mark ?? ''), String(r.title ?? ''), String(r.artist ?? ''))
-				)
-			);
-
-			let position = (gridApi?.getState().data ?? []).length;
-			let added = 0;
-			for (const track of parsed) {
-				const mark = formatTrackTime(track.markSeconds ?? null);
-				const key = rowKey(mark, track.title, track.artist);
-				if (existing.has(key)) continue;
-				existing.add(key);
-
-				await gridApi.exec('add-row', {
-					row: {
-						id: crypto.randomUUID(),
-						position: ++position,
-						mark,
-						title: track.title,
-						artist: track.artist,
-						album: '',
-						url: ''
-					},
-					after: null
-				});
-				added += 1;
+			// Remember the URL on the episode so a later import needs no retyping.
+			if (body.url && body.url !== broadcast.serato_url) {
+				void saveSeratoUrl(body.url, { silent: true });
 			}
 
-			renumber();
-			const skipped = parsed.length - added;
+			const { added, skipped } = await appendImportedRows(
+				parsed.map((t) => ({ markSeconds: t.markSeconds, artist: t.artist, title: t.title }))
+			);
 			seratoNotice = `${added} track${added === 1 ? '' : 's'} added${
 				skipped > 0 ? `, ${skipped} already present` : ''
 			}.`;
@@ -454,23 +486,33 @@
 		}
 	}
 
-	/** Save the show's Serato handle (used to derive each episode's URL). */
-	async function saveSeratoHandle() {
+	/** Save (or clear) this episode's Serato playlist URL. */
+	async function saveSeratoUrl(explicitUrl?: string, opts?: { silent?: boolean }) {
 		seratoError = '';
-		seratoNotice = '';
-		const res = await fetch(`/api/shows/${show.id}/serato`, {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ seratoUser: seratoHandle.trim() })
-		});
-		const body = (await res.json().catch(() => ({}))) as { seratoUser?: string | null; error?: string };
-		if (!res.ok) {
-			seratoError = body.error ?? 'Could not save the handle.';
-			return;
+		if (!opts?.silent) seratoNotice = '';
+		seratoSaving = true;
+
+		const value = (explicitUrl ?? seratoUrl).trim();
+		try {
+			const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/serato`, {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ url: value })
+			});
+			const body = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
+
+			if (!res.ok) {
+				if (!opts?.silent) seratoError = body.error ?? 'Could not save the URL.';
+				return;
+			}
+
+			seratoUrl = body.url ?? '';
+			if (!opts?.silent) {
+				seratoNotice = seratoUrl ? 'Serato playlist URL saved.' : 'Serato playlist URL cleared.';
+			}
+		} finally {
+			seratoSaving = false;
 		}
-		seratoHandle = body.seratoUser ?? '';
-		showSeratoHandleField = false;
-		seratoNotice = seratoHandle ? `Serato handle saved (${seratoHandle}).` : 'Serato handle cleared.';
 	}
 
 	/**
@@ -511,6 +553,103 @@
 			? `${filled} Bandcamp link${filled === 1 ? '' : 's'} matched (best-guess — check before saving).`
 			: 'No confident Bandcamp matches found.';
 		bandcampBusy = false;
+	}
+
+	/**
+	 * Track Detect: start (or reuse) a detection for this episode and import the
+	 * results. Admin-only while trialling. POST never spends a second credit for a
+	 * job that is already queued/running/done; `restart` is an explicit re-run.
+	 */
+	async function detectTracks(restart = false) {
+		detectError = '';
+		detectNotice = '';
+		detectBusy = true;
+
+		try {
+			const res = await fetch(
+				`/api/shows/${show.id}/broadcasts/${broadcast.id}/detect${restart ? '?restart=1' : ''}`,
+				{ method: 'POST' }
+			);
+			const body = (await res.json().catch(() => ({}))) as {
+				error?: string;
+				status?: string;
+				jobId?: string;
+				reused?: boolean;
+				credits?: number | null;
+			};
+			if (!res.ok) {
+				detectError = body.error ?? 'Could not start the detection.';
+				return;
+			}
+
+			detectStatus = body.status ?? 'queued';
+			detectNotice =
+				body.reused && body.status === 'done'
+					? 'Reading the finished detection (no credit spent).'
+					: `Detection ${body.status ?? 'queued'} — this can take several minutes.`;
+
+			await pollDetection();
+		} catch {
+			detectError = 'Could not reach Track Detect.';
+		} finally {
+			detectBusy = false;
+		}
+	}
+
+	async function pollDetection() {
+		for (let attempt = 0; attempt < 60; attempt += 1) {
+			const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/detect`);
+			const body = (await res.json().catch(() => ({}))) as {
+				error?: string;
+				code?: string;
+				status?: string;
+				progress?: number | null;
+				tracks?: Array<{
+					timestamp: number;
+					artist: string;
+					title: string;
+					links?: { bandcamp?: string | null };
+				}>;
+			};
+
+			if (!res.ok) {
+				detectError = body.error ?? 'Detection failed.';
+				return;
+			}
+
+			detectStatus = body.status ?? detectStatus;
+			detectProgress = typeof body.progress === 'number' ? body.progress : null;
+
+			if (detectStatus === 'failed') {
+				detectError = body.error ?? 'Detection failed (the credit was refunded).';
+				return;
+			}
+
+			if (detectStatus === 'done') {
+				const tracks = body.tracks ?? [];
+				if (tracks.length === 0) {
+					detectNotice = 'Detection finished but nothing was recognised.';
+					return;
+				}
+				const { added, skipped } = await appendImportedRows(
+					tracks.map((t) => ({
+						markSeconds: t.timestamp,
+						artist: t.artist,
+						title: t.title,
+						url: t.links?.bandcamp ?? ''
+					}))
+				);
+				detectNotice = `${added} track${added === 1 ? '' : 's'} added${
+					skipped > 0 ? `, ${skipped} already present` : ''
+				}.`;
+				return;
+			}
+
+			detectNotice = `Detecting… ${detectProgress ?? 0}%`;
+			await new Promise((resolve) => setTimeout(resolve, 10_000));
+		}
+
+		detectError = 'Still running — reopen this episode later to fetch the finished detection.';
 	}
 
 	async function onCsvPicked(el: HTMLInputElement) {
@@ -1075,32 +1214,22 @@
 	</div>
 
 	<div class="serato-row">
-		<label for="serato-handle">Serato handle</label>
-		<input
-			id="serato-handle"
-			type="text"
-			placeholder="e.g. Version_Excursions"
-			bind:value={seratoHandle}
-			onkeydown={(e) => e.key === 'Enter' && saveSeratoHandle()}
-		/>
-		<Button css="vr-cta ghost" onclick={saveSeratoHandle}>Save handle</Button>
-	</div>
-	{#if showSeratoHandleField}
-		<p class="hint">
-			Your playlist URL looks like <code>serato.com/playlists/&lt;handle&gt;/&lt;date&gt;</code> — the
-			middle part is the handle. It stays on the show, so every episode derives its own URL.
-		</p>
-	{/if}
-	<div class="serato-row">
-		<label for="serato-url">Or paste a playlist URL</label>
+		<label for="serato-url">Serato playlist URL</label>
 		<input
 			id="serato-url"
 			type="url"
-			placeholder="https://serato.com/playlists/…"
-			bind:value={seratoUrlInput}
+			placeholder="https://serato.com/playlists/<dj>/<date>"
+			bind:value={seratoUrl}
 			onkeydown={(e) => e.key === 'Enter' && importSerato()}
 		/>
+		<Button css="vr-cta ghost" disabled={seratoSaving} onclick={() => saveSeratoUrl()}>
+			{seratoSaving ? 'Saving…' : 'Save URL'}
+		</Button>
 	</div>
+	<p class="hint">
+		Open your set on serato.com and paste its address. It is stored on this episode, so the
+		import works later without retyping.
+	</p>
 	{#if seratoError}
 		<p class="replay-msg bad">{seratoError}</p>
 	{/if}
@@ -1109,6 +1238,28 @@
 	{/if}
 	{#if bandcampNotice}
 		<p class="replay-msg ok">{bandcampNotice}</p>
+	{/if}
+
+	{#if isAdmin}
+		<div class="serato-row">
+			<Button css="vr-cta ghost" disabled={detectBusy} onclick={() => detectTracks(false)}>
+				{detectBusy && detectStatus && detectStatus !== 'done'
+					? `Detecting… ${detectProgress ?? 0}%`
+					: 'Detect tracks'}
+			</Button>
+			{#if detectStatus === 'done' || broadcast.detect_status === 'done'}
+				<Button css="vr-cta ghost" disabled={detectBusy} onclick={() => detectTracks(true)}>
+					Detect again (1 credit)
+				</Button>
+			{/if}
+			<span class="hint">Beta · fingerprints the replay via Track Detect. One credit per new run.</span>
+		</div>
+		{#if detectError}
+			<p class="replay-msg bad">{detectError}</p>
+		{/if}
+		{#if detectNotice}
+			<p class="replay-msg ok">{detectNotice}</p>
+		{/if}
 	{/if}
 
 	{#if error}

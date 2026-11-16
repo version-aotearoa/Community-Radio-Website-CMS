@@ -22,8 +22,6 @@ export interface ShowRow {
 	paused_until: string | null;
 	/** YYYY-MM-DD the current break started. */
 	paused_at: string | null;
-	/** Serato playlist handle; the per-episode URL is derived from it. */
-	serato_user: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -43,6 +41,13 @@ export interface BroadcastRow {
 	art: string | null;
 	/** Hidden from public lists without being deleted (see migrations/0030). */
 	cancelled: number;
+	/** Serato public playlist URL for this episode (migrations/0033). */
+	serato_url: string | null;
+	/** Track Detect job for this episode's recording (migrations/0032). */
+	detect_job_id: string | null;
+	detect_status: string | null;
+	detect_progress: number | null;
+	detect_checked_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
