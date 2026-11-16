@@ -266,7 +266,7 @@
 
 	/** Hand a resolved stream to the global player (single shared <audio>). */
 	function startTrack(
-		t: { id: string; title: string; artist: string },
+		t: { id: string; title: string; artist: string; url?: string | null },
 		body: ResolvedStream
 	) {
 		if (!body.streamUrl) return;
@@ -279,7 +279,9 @@
 			url: body.streamUrl,
 			title: body.title || t.title || 'Bandcamp',
 			artist: body.artist || t.artist || null,
-			art: body.art ?? artUrl ?? artFallback,
+			// A Bandcamp track with no cover shows the Bandcamp mark rather than
+			// borrowing the episode art, which read as "wrong artwork".
+			art: body.art ?? trackArt(t) ?? artUrl ?? artFallback,
 			show: { id: show.id, title: show.title },
 			href: `/shows/${show.id}/${broadcast.id}`,
 			broadcastId: broadcast.id,
@@ -296,7 +298,7 @@
 				trackId: t.id,
 				title: t.title,
 				artist: t.artist || null,
-				art: trackMeta[t.id]?.art ?? bandcampArtUrl(t.stream_art_id) ?? null
+				art: trackArt(t)
 			}));
 	}
 
@@ -343,9 +345,22 @@
 		}
 	}
 
+	/**
+	 * Artwork for a Bandcamp row: freshly-resolved meta → cached art id → the
+	 * Bandcamp placeholder when the row is a Bandcamp track with no cover.
+	 * Rows without a Bandcamp link get nothing (they aren't ours to badge).
+	 */
+	const BANDCAMP_PLACEHOLDER = '/bandcamp-placeholder.svg';
+
+	function trackArt(t: { id: string; url?: string | null; stream_art_id?: string | null }): string | null {
+		const art = trackMeta[t.id]?.art ?? bandcampArtUrl(t.stream_art_id ?? null);
+		if (art) return art;
+		return t.url && isBandcampPageUrl(t.url) ? BANDCAMP_PLACEHOLDER : null;
+	}
+
 	/** Artwork for a row: freshly-resolved meta, else the cached Bandcamp art id. */
-	function rowArt(t: { id: string; stream_art_id?: string | null }): string | null {
-		return trackMeta[t.id]?.art ?? bandcampArtUrl(t.stream_art_id ?? null);
+	function rowArt(t: TrackRow): string | null {
+		return trackArt(t);
 	}
 
 	/**
@@ -855,7 +870,15 @@
 						{@render cueCell(t)}
 						{@render markCell(t)}
 						{#if rowArt(t)}
-							<img class="bc-art" src={rowArt(t)} alt="" width="28" height="28" loading="lazy" />
+							<img
+								class="bc-art"
+								src={rowArt(t)}
+								alt=""
+								width="28"
+								height="28"
+								loading="lazy"
+								onerror={(e) => artOnError(e, BANDCAMP_PLACEHOLDER)}
+							/>
 						{/if}
 						<button
 							class="track-play"
