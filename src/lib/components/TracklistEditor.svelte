@@ -87,9 +87,8 @@
 	let seratoBusy = $state(false);
 	let seratoError = $state('');
 	let seratoNotice = $state('');
-	let seratoHandle = $state('');
-	let seratoUrlInput = $state('');
-	let showSeratoHandleField = $state(false);
+	let seratoUrl = $state('');
+	let seratoSaving = $state(false);
 	let bandcampBusy = $state(false);
 	let bandcampNotice = $state('');
 
@@ -102,9 +101,9 @@
 	let detectProgress = $state<number | null>(null);
 	let detectTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// Follow the show's saved handle when fresh server data arrives.
+	// Follow the episode's saved Serato playlist URL when fresh data arrives.
 	$effect(() => {
-		seratoHandle = show.serato_user ?? '';
+		seratoUrl = broadcast.serato_url ?? '';
 	});
 
 	// Sync the replay/description/slug form fields whenever the broadcast prop
@@ -416,19 +415,24 @@
 		seratoBusy = true;
 
 		try {
-			const query = seratoUrlInput.trim() ? `?url=${encodeURIComponent(seratoUrlInput.trim())}` : '';
+			const typed = seratoUrl.trim();
+			if (!typed && !broadcast.serato_url) {
+				seratoError = 'Paste the Serato playlist URL for this set first.';
+				return;
+			}
+
+			const query = typed ? `?url=${encodeURIComponent(typed)}` : '';
 			const res = await fetch(
 				`/api/shows/${show.id}/broadcasts/${broadcast.id}/serato${query}`
 			);
 			const body = (await res.json().catch(() => ({}))) as {
 				status?: string;
+				url?: string;
 				tracks?: Array<{
 					markSeconds: number | null;
 					artist: string;
 					title: string;
 				}>;
-				handle?: string | null;
-				tried?: string[];
 				detail?: string;
 				error?: string;
 			};
@@ -438,14 +442,13 @@
 				return;
 			}
 
-			if (body.status === 'no-handle') {
-				showSeratoHandleField = true;
-				seratoError = 'Set your Serato handle first — it is on your playlist URL.';
+			if (body.status === 'no-url') {
+				seratoError = 'Paste the Serato playlist URL for this set first.';
 				return;
 			}
 
 			if (body.status === 'not-published') {
-				seratoError = `No Serato playlist published for ${broadcast.date} yet.`;
+				seratoError = 'Serato has no playlist at that URL (yet).';
 				return;
 			}
 
@@ -465,6 +468,11 @@
 				return;
 			}
 
+			// Remember the URL on the episode so a later import needs no retyping.
+			if (body.url && body.url !== broadcast.serato_url) {
+				void saveSeratoUrl(body.url, { silent: true });
+			}
+
 			const { added, skipped } = await appendImportedRows(
 				parsed.map((t) => ({ markSeconds: t.markSeconds, artist: t.artist, title: t.title }))
 			);
@@ -478,23 +486,33 @@
 		}
 	}
 
-	/** Save the show's Serato handle (used to derive each episode's URL). */
-	async function saveSeratoHandle() {
+	/** Save (or clear) this episode's Serato playlist URL. */
+	async function saveSeratoUrl(explicitUrl?: string, opts?: { silent?: boolean }) {
 		seratoError = '';
-		seratoNotice = '';
-		const res = await fetch(`/api/shows/${show.id}/serato`, {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ seratoUser: seratoHandle.trim() })
-		});
-		const body = (await res.json().catch(() => ({}))) as { seratoUser?: string | null; error?: string };
-		if (!res.ok) {
-			seratoError = body.error ?? 'Could not save the handle.';
-			return;
+		if (!opts?.silent) seratoNotice = '';
+		seratoSaving = true;
+
+		const value = (explicitUrl ?? seratoUrl).trim();
+		try {
+			const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/serato`, {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ url: value })
+			});
+			const body = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
+
+			if (!res.ok) {
+				if (!opts?.silent) seratoError = body.error ?? 'Could not save the URL.';
+				return;
+			}
+
+			seratoUrl = body.url ?? '';
+			if (!opts?.silent) {
+				seratoNotice = seratoUrl ? 'Serato playlist URL saved.' : 'Serato playlist URL cleared.';
+			}
+		} finally {
+			seratoSaving = false;
 		}
-		seratoHandle = body.seratoUser ?? '';
-		showSeratoHandleField = false;
-		seratoNotice = seratoHandle ? `Serato handle saved (${seratoHandle}).` : 'Serato handle cleared.';
 	}
 
 	/**
@@ -1196,32 +1214,22 @@
 	</div>
 
 	<div class="serato-row">
-		<label for="serato-handle">Serato handle</label>
-		<input
-			id="serato-handle"
-			type="text"
-			placeholder="e.g. Version_Excursions"
-			bind:value={seratoHandle}
-			onkeydown={(e) => e.key === 'Enter' && saveSeratoHandle()}
-		/>
-		<Button css="vr-cta ghost" onclick={saveSeratoHandle}>Save handle</Button>
-	</div>
-	{#if showSeratoHandleField}
-		<p class="hint">
-			Your playlist URL looks like <code>serato.com/playlists/&lt;handle&gt;/&lt;date&gt;</code> — the
-			middle part is the handle. It stays on the show, so every episode derives its own URL.
-		</p>
-	{/if}
-	<div class="serato-row">
-		<label for="serato-url">Or paste a playlist URL</label>
+		<label for="serato-url">Serato playlist URL</label>
 		<input
 			id="serato-url"
 			type="url"
-			placeholder="https://serato.com/playlists/…"
-			bind:value={seratoUrlInput}
+			placeholder="https://serato.com/playlists/<dj>/<date>"
+			bind:value={seratoUrl}
 			onkeydown={(e) => e.key === 'Enter' && importSerato()}
 		/>
+		<Button css="vr-cta ghost" disabled={seratoSaving} onclick={() => saveSeratoUrl()}>
+			{seratoSaving ? 'Saving…' : 'Save URL'}
+		</Button>
 	</div>
+	<p class="hint">
+		Open your set on serato.com and paste its address. It is stored on this episode, so the
+		import works later without retyping.
+	</p>
 	{#if seratoError}
 		<p class="replay-msg bad">{seratoError}</p>
 	{/if}

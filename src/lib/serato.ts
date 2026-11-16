@@ -14,10 +14,10 @@
  * `track.mark_seconds` wants. The page is public HTML with no API, so parsing is
  * deliberately tolerant: we split on the opening tag, take the last-seen fields,
  * and fail soft on rows we can't read.
+ *
+ * The URL is stored per episode (`broadcast.serato_url`) rather than derived
+ * from a show handle: it already names the DJ and the date.
  */
-
-/** Serato handles are URL path segments: letters, digits, dot, dash, underscore. */
-export const SERATO_USER_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 
 export interface SeratoTrack {
 	/** `126650913` from `id="track_…"`; stable per playlist entry. */
@@ -30,28 +30,10 @@ export interface SeratoTrack {
 	raw: string;
 }
 
-/** Trim a candidate handle; returns null when it isn't usable. */
-export function normalizeSeratoUser(input: string | null | undefined): string | null {
-	const value = (input ?? '').trim().replace(/^@/, '');
-	if (!value) return null;
-	return SERATO_USER_RE.test(value) ? value : null;
-}
-
-/**
- * Candidate playlist URLs for a broadcast date (`YYYY-MM-DD`).
- *
- * Serato's day/month padding for single-digit days is unconfirmed, so both the
- * padded and unpadded forms are offered and fetched in order.
- */
-export function seratoPlaylistUrls(user: string, date: string): string[] {
-	const [year, month, day] = date.split('-');
-	if (!year || !month || !day) return [];
-
-	const padded = `${day}-${month}-${year}`;
-	const unpadded = `${Number(day)}-${Number(month)}-${year}`;
-	const base = `https://serato.com/playlists/${encodeURIComponent(user)}`;
-
-	return unpadded === padded ? [`${base}/${padded}`] : [`${base}/${padded}`, `${base}/${unpadded}`];
+/** Trim a pasted playlist URL; returns null when it isn't a Serato playlist page. */
+export function normalizeSeratoPlaylistUrl(input: string | null | undefined): string | null {
+	const value = (input ?? '').trim();
+	return isSeratoPlaylistUrl(value) ? value : null;
 }
 
 /** True for a URL we are willing to fetch (public Serato playlist pages only). */
@@ -66,17 +48,6 @@ export function isSeratoPlaylistUrl(input: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-/** Accept a pasted playlist URL or a bare handle; null when it is neither. */
-export function resolveSeratoInput(input: string): { kind: 'url'; url: string } | { kind: 'user'; user: string } | null {
-	const value = input.trim();
-	if (!value) return null;
-	if (/^https?:\/\//i.test(value)) {
-		return isSeratoPlaylistUrl(value) ? { kind: 'url', url: value } : null;
-	}
-	const user = normalizeSeratoUser(value);
-	return user ? { kind: 'user', user } : null;
 }
 
 function decodeEntities(text: string): string {
