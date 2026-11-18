@@ -407,6 +407,22 @@
 		if (replyTo?.id === msg.id) replyTo = null;
 	}
 
+	/** Toggle the GIF picker. On phones, drop the soft keyboard first so the
+	 *  picker — which renders below the composer — has room to scroll into view. */
+	function toggleGifPicker() {
+		if (gifPickerOpen) {
+			gifPickerOpen = false;
+			return;
+		}
+		if (window.matchMedia('(max-width: 640px)').matches) {
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.closest('input, textarea, [contenteditable="true"]')) {
+				active.blur();
+			}
+		}
+		gifPickerOpen = true;
+	}
+
 	function onPickGif(gif: GifMedia) {
 		gifPickerOpen = false;
 		const wasReply = !!replyTo;
@@ -509,7 +525,7 @@
 						class="gif-btn"
 						class:active={gifPickerOpen}
 						disabled={!connected}
-						onclick={() => (gifPickerOpen = !gifPickerOpen)}
+						onclick={toggleGifPicker}
 						aria-label="Add a GIF"
 						title="Add a GIF"
 						aria-expanded={gifPickerOpen}

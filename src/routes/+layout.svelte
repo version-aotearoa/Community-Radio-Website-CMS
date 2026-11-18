@@ -8,6 +8,7 @@
 	import InstallPrompt from '$lib/components/InstallPrompt.svelte';
 	import SocialLinks from '$lib/components/SocialLinks.svelte';
 	import { initBannerDismissed, initPwa, registerServiceWorker } from '$lib/pwa';
+	import { resetZoomOnKeyboardClose } from '$lib/mobile-zoom';
 	import { requestCollapsePlayer } from '$lib/stores/player';
 	import { displayNameFor } from '$lib/displayName';
 	import { authClient } from '$lib/client';
@@ -183,7 +184,11 @@
 		document.addEventListener('focusin', updateRotateGate);
 		document.addEventListener('focusout', onFocusOut);
 
+		// iOS leaves the page zoomed after a focused field's keyboard closes.
+		const stopZoomReset = resetZoomOnKeyboardClose();
+
 		return () => {
+			stopZoomReset();
 			document.removeEventListener('pointerdown', onDocPointer);
 			window.removeEventListener('pageshow', onPageshow);
 			window.removeEventListener('resize', updateRotateGate);
