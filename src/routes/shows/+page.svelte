@@ -466,4 +466,81 @@
 	.card:hover .desc {
 		color: rgba(0, 0, 0, 0.8);
 	}
+
+	/* Phones: two cards per row. Columns land around 165–180px, so the image
+	   gets squarer, padding and type step down, and long titles/descriptions
+	   clamp so neighbouring cards keep the same height. */
+	@media (max-width: 640px) {
+		.grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		/* Fill the cell so a card with a two-line title doesn't end above its
+		   neighbour's row — the collapsed borders then read as one block. */
+		.grid > li {
+			display: flex;
+		}
+
+		.card {
+			flex: 1;
+		}
+
+		.card-img {
+			aspect-ratio: 1.25;
+		}
+
+		.card-img.empty svg {
+			width: 64px;
+			height: 56px;
+		}
+
+		.card-body {
+			padding: 0.6rem 0.65rem 0.75rem;
+		}
+
+		.card-meta {
+			font-size: 0.66rem;
+			line-height: 1.35;
+			margin-bottom: 0.4rem;
+		}
+
+		.card-body h2 {
+			font-size: 1.05rem;
+			line-height: 1.1;
+			display: -webkit-box;
+			-webkit-line-clamp: 2;
+			-webkit-box-orient: vertical;
+			overflow: hidden;
+		}
+
+		.dj {
+			font-size: 0.7rem;
+			margin-top: 0.35rem;
+		}
+
+		.dj-spacer {
+			height: 0.8rem;
+			margin-top: 0.35rem;
+		}
+
+		.desc {
+			font-size: 0.75rem;
+			margin-top: 0.35rem;
+			display: -webkit-box;
+			-webkit-line-clamp: 2;
+			-webkit-box-orient: vertical;
+			overflow: hidden;
+		}
+
+		.event-tag {
+			font-size: 0.6rem;
+			padding: 0.05rem 0.3rem;
+			margin-right: 0.3rem;
+		}
+
+		/* Won't fit beside the meta line at this width. */
+		.break-tag {
+			display: none;
+		}
+	}
 </style>
