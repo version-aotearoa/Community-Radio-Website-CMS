@@ -43,6 +43,7 @@
 	let loading = $state(false);
 	let error = $state('');
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let pickerEl = $state<HTMLDivElement | null>(null);
 
 	function urlFor(q: string): string {
 		const base = q
@@ -94,11 +95,24 @@
 
 	onMount(() => {
 		load('');
+		// On phones the picker renders below the composer, near the bottom of the
+		// viewport, so it would otherwise open off-screen. Wait a frame so the
+		// keyboard collapse (triggered by the GIF button) has reflowed first.
+		if (window.matchMedia('(max-width: 640px)').matches) {
+			const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+			const frame = requestAnimationFrame(() => {
+				pickerEl?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+			});
+			return () => {
+				cancelAnimationFrame(frame);
+				clearTimeout(timer);
+			};
+		}
 		return () => clearTimeout(timer);
 	});
 </script>
 
-<div class="gif-picker">
+<div class="gif-picker" bind:this={pickerEl}>
 	<div class="picker-head">
 		<input
 			class="picker-input"
@@ -240,6 +254,11 @@
 		.gif-picker {
 			border-left: none;
 			border-right: none;
+		}
+
+		/* 16px keeps phones from auto-zooming when the search field is focused. */
+		.picker-input {
+			font-size: 1rem;
 		}
 
 		.picker-grid {

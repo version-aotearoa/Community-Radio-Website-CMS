@@ -330,3 +330,12 @@ img {
 	border-color: #fff !important;
 	box-shadow: 0 0 0 2px #fff, inset 0 0 0 1px #fff !important;
 }
+
+/* svar-ui's Text/TextArea put the `css` classes on a wrapper div, so the rule
+   above sizes the wrapper while the real control falls back to the theme's
+   14px — under the 16px threshold phones use to auto-zoom on focus. Pin the
+   control itself to 16px so tapping a field never magnifies the page. */
+.vr-input input,
+.vr-input textarea {
+	font-size: 1rem !important;
+}
