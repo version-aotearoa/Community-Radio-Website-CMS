@@ -551,6 +551,37 @@ export async function getSchedule(db: D1Database): Promise<ScheduleShow[]> {
 	});
 }
 
+/** One row in the /shows episode list (past, public broadcasts only). */
+export interface EpisodeListItem {
+	id: string;
+	show_id: string;
+	date: string;
+	start_minutes: number;
+	duration_minutes: number;
+	replay_url: string | null;
+	/** Optional per-episode title (migrations/0034); null falls back to the show. */
+	episode_title: string | null;
+	show_title: string;
+	kind: string;
+}
+
+/** Past episodes for every active show, newest first. Small enough to load whole. */
+export async function getEpisodeArchive(db: D1Database): Promise<EpisodeListItem[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT b.id, b.show_id, b.date, b.start_minutes, b.duration_minutes, b.replay_url,
+			        b.title AS episode_title, s.title AS show_title, s.kind
+			 FROM broadcast b
+			 JOIN show s ON s.id = b.show_id
+			 WHERE s.active = 1 AND b.cancelled = 0 AND b.date <= ?
+			 ORDER BY b.date DESC, b.start_minutes DESC`
+		)
+		.bind(todayStr())
+		.all();
+	const now = zonedNow();
+	return (results as unknown as EpisodeListItem[]).filter((b) => broadcastEnded(now, b));
+}
+
 /** Loose name normalisation: lowercase, strip anything but a-z/0-9/spaces. */
 export function normalizeText(s: string): string {
 	return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
@@ -619,8 +650,11 @@ export function nextCycleWeekDate(dayOfWeek: number, targetWeek: number, fromDat
 	return date;
 }
 
-export interface UpcomingBroadcast extends BroadcastRow {
+export interface UpcomingBroadcast extends Omit<BroadcastRow, 'title'> {
+	/** Show title — episode titles come back as `episode_title`. */
 	title: string;
+	/** Optional per-episode title (migrations/0034). */
+	episode_title: string | null;
 	dj_name: string | null;
 	kind: string;
 	event_type: string | null;
@@ -640,7 +674,7 @@ export async function getOnAirBroadcast(
 ): Promise<AiringInfo | null> {
 	return db
 		.prepare(
-			`SELECT b.*, s.title, s.kind, s.event_type, s.image, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name, u.image AS dj_image
+			`SELECT b.*, s.title, b.title AS episode_title, s.kind, s.event_type, s.image, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name, u.image AS dj_image
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
@@ -660,7 +694,7 @@ export async function getNextBroadcast(
 ): Promise<AiringInfo | null> {
 	return db
 		.prepare(
-			`SELECT b.*, s.title, s.kind, s.event_type, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name, u.image AS dj_image
+			`SELECT b.*, s.title, b.title AS episode_title, s.kind, s.event_type, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name, u.image AS dj_image
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
@@ -701,7 +735,7 @@ export async function getUpcomingBroadcasts(
 	const to = addDays(from, days);
 	const { results } = await db
 		.prepare(
-			`SELECT b.*, s.title, s.kind, s.event_type, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name
+			`SELECT b.*, s.title, b.title AS episode_title, s.kind, s.event_type, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
