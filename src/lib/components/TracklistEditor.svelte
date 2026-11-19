@@ -318,8 +318,16 @@
 		return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 	}
 
-	async function addTrack() {
-		const rows = gridApi?.getState().data ?? [];
+	/**
+	 * Add a track below the selected row (the last one when several are
+	 * selected, or the focused cell's row), so mid-list fixes don't need a
+	 * drag. With nothing selected it appends to the end.
+	 */
+	async function insertTrack() {
+		const state = gridApi?.getState();
+		const rows = state?.data ?? [];
+		const selected: string[] = state?.selectedRows ?? [];
+		const anchorId = selected.at(-1) ?? state?.focusCell?.row ?? rows.at(-1)?.id;
 		await gridApi.exec('add-row', {
 			row: {
 				id: crypto.randomUUID(),
@@ -330,7 +338,7 @@
 				album: '',
 				url: ''
 			},
-			after: rows.at(-1)?.id,
+			after: anchorId,
 			select: true
 		});
 		renumber();
@@ -1206,7 +1214,7 @@
 		<Button css="vr-cta ghost" disabled={bandcampBusy} onclick={findBandcampLinks}>
 			{bandcampBusy ? 'Matching Bandcamp…' : 'Find Bandcamp links'}
 		</Button>
-		<Button css="vr-cta ghost" onclick={addTrack}>+ Add track</Button>
+		<Button css="vr-cta ghost" onclick={insertTrack}>+ Insert track</Button>
 		<Button css="vr-cta ghost" onclick={deleteSelected}>Delete selected</Button>
 		<Button css="vr-cta" type="primary" disabled={saving} onclick={save}>
 			{saving ? 'Saving…' : 'Save tracklist'}
@@ -1293,7 +1301,8 @@
 
 	<p class="hint">Click a cell to edit it. Time is where the track starts in this episode's
 		recording (m:ss or h:mm:ss) — listeners click it to jump there. Use the replay strip
-		above to play, skip ±5s / ±1 min or scrub, select a row, then “Stamp time”. Drag rows to
+		above to play, skip ±5s / ±1 min or scrub, select a row, then “Stamp time”. “Insert
+		track” adds a row below the selected one (or at the end). Drag rows to
 		reorder. Use Ctrl+Z / Ctrl+Y to undo and redo.</p>
 {/if}
 </div>
