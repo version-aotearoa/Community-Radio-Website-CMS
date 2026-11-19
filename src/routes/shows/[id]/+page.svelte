@@ -171,6 +171,12 @@
 		}).format(new Date(`${dateStr}T00:00:00Z`));
 	}
 
+	/** Compact card date: YYYY-MM-DD → DD-MM-YY. */
+	function fmtCardDate(dateStr: string) {
+		const [y, m, d] = dateStr.split('-');
+		return `${d}-${m}-${y.slice(2)}`;
+	}
+
 	function cycleWeeksLabel(): string {
 		const weeks = data.showCycleWeeks;
 		if (weeks.length === 1) return `week ${weeks[0]}`;
@@ -350,14 +356,23 @@
 	{#if upcoming.length > 0}
 		<section class="block">
 			<h2 class="h-md">Upcoming</h2>
-			<ul class="broadcasts">
+			<ul class="broadcasts upcoming-list">
 				{#each upcoming as b (b.id)}
 					<li class="broadcast" class:today={b.date === data.today}>
 						<header>
-							<strong>{fmtDate(b.date)}</strong>
-							<span class="mono">
-								{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
-							</span>
+							{#if b.title}
+								<strong>{b.title}</strong>
+								<span class="mono">
+									{fmtCardDate(b.date)} · {fmtTime(b.start_minutes)}–{fmtTime(
+										b.start_minutes + b.duration_minutes
+									)}
+								</span>
+							{:else}
+								<strong>{fmtCardDate(b.date)}</strong>
+								<span class="mono">
+									{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
+								</span>
+							{/if}
 						{#if data.canEdit}
 							<a
 								class="edit-mini"
@@ -398,7 +413,7 @@
 {#if past.length > 0}
 		<section class="block">
 			<h2 class="h-md">{show.kind === 'event' ? 'Broadcast recording' : 'Past broadcasts'}</h2>
-			<ul class="broadcasts">
+			<ul class="broadcasts past-list">
 				{#each past as b, i (b.id)}
 					{@const epArt = episodeArtOrDefault(b.id, b, show)}
 					{@const epArtFb = [show.image, show.dj_image]}
@@ -406,7 +421,7 @@
 						<a
 							class="past-art"
 							href={`/shows/${show.id}/${b.id}`}
-							aria-label={`View ${fmtDate(b.date)} episode`}
+							aria-label={`View ${b.title ?? fmtDate(b.date)} episode`}
 						>
 							{#if epArt}
 								<img
@@ -428,7 +443,12 @@
 						</a>
 						<div class="past-body">
 							<header>
-								<strong>{fmtDate(b.date)}</strong>
+								{#if b.title}
+									<strong>{b.title}</strong>
+									<span class="mono">{fmtCardDate(b.date)}</span>
+								{:else}
+									<strong>{fmtCardDate(b.date)}</strong>
+								{/if}
 								{#if data.canEdit}
 									<a
 										class="edit-mini"
@@ -667,6 +687,23 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
+	}
+
+	/* Desktop: the upcoming card takes half the content width, and past
+	   broadcasts sit two-up. Mobile keeps the single full-width column. */
+	@media (min-width: 641px) {
+		.upcoming-list {
+			width: 50%;
+		}
+
+		.past-list {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.past-list > li {
+			min-width: 0;
+		}
 	}
 
 	.broadcast.today {

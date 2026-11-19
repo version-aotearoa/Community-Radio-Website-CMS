@@ -77,6 +77,10 @@
 	let slugInput = $state('');
 	let slugSaving = $state(false);
 	let slugError = $state('');
+	let titleInput = $state('');
+	let titleSaving = $state(false);
+	let titleError = $state('');
+	let titleNotice = $state('');
 	let artInput = $state('');
 	let artSaving = $state(false);
 	let artError = $state('');
@@ -112,6 +116,7 @@
 		replayInput = broadcast.replay_url ?? '';
 		descInput = broadcast.description ?? '';
 		slugInput = broadcast.id;
+		titleInput = broadcast.title ?? '';
 		artInput = broadcast.art ?? '';
 	});
 
@@ -818,6 +823,41 @@
 		descNotice = 'Description cleared.';
 	}
 
+	async function saveTitle() {
+		titleError = '';
+		titleNotice = '';
+		titleSaving = true;
+		const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/title`, {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ title: titleInput })
+		});
+		titleSaving = false;
+		if (!res.ok) {
+			titleError = await readErrorMessage(res);
+			return;
+		}
+		await invalidateAll();
+		titleNotice = titleInput.trim() ? 'Episode title saved.' : 'Episode title cleared.';
+	}
+
+	async function clearTitle() {
+		titleError = '';
+		titleNotice = '';
+		titleSaving = true;
+		const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/title`, {
+			method: 'DELETE'
+		});
+		titleSaving = false;
+		if (!res.ok) {
+			titleError = await readErrorMessage(res);
+			return;
+		}
+		titleInput = '';
+		await invalidateAll();
+		titleNotice = 'Episode title cleared.';
+	}
+
 	async function saveSlug() {
 		slugError = '';
 		slugSaving = true;
@@ -1072,6 +1112,32 @@
 {/if}
 
 {#if activeTab === 'episode'}
+	<div class="desc-row">
+		<label for="episode-title">Episode title (optional)</label>
+		<input
+			id="episode-title"
+			type="text"
+			maxlength="120"
+			placeholder={show.title}
+			bind:value={titleInput}
+			onkeydown={(e) => e.key === 'Enter' && saveTitle()}
+		/>
+		<div class="desc-actions">
+			<Button css="vr-cta ghost" disabled={titleSaving} onclick={saveTitle}>
+				{titleSaving ? 'Saving…' : 'Save'}
+			</Button>
+			<Button css="vr-cta ghost" disabled={titleSaving} onclick={clearTitle}>Clear</Button>
+		</div>
+		<p class="hint">Shown on the show page and this episode's page. Leave blank to use the
+			show title.</p>
+		{#if titleError}
+			<p class="replay-msg bad">{titleError}</p>
+		{/if}
+		{#if titleNotice}
+			<p class="replay-msg ok">{titleNotice}</p>
+		{/if}
+	</div>
+
 	<div class="desc-row">
 		<label for="episode-slug">Episode ID</label>
 		<input

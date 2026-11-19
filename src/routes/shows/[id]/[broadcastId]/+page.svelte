@@ -405,7 +405,7 @@
 	function replaySource(startAt: number | null = null) {
 		return {
 			url: broadcast.replay_url!,
-			title: show.title,
+			title: broadcast.title ?? show.title,
 			artist: show.kind === 'event' ? null : (show.dj_name ?? null),
 			art: artUrl,
 			show: { id: show.id, title: show.title },
@@ -621,11 +621,11 @@
 </script>
 
 <svelte:head>
-	<title>{show.title} — {fmtDate(broadcast.date)} — Version Radio</title>
+	<title>{broadcast.title ?? show.title} — {fmtDate(broadcast.date)} — Version Radio</title>
 </svelte:head>
 
 <Seo
-	title={`${show.title} — ${fmtDate(broadcast.date)}`}
+	title={`${broadcast.title ?? show.title} — ${fmtDate(broadcast.date)}`}
 	description={show.pageContentText || show.description || undefined}
 	image={artUrl ?? show.image}
 	url={page.url.pathname}
@@ -714,7 +714,7 @@
 		{/if}
 	</div>
 
-	<h1 class="h-lg">{show.title}</h1>
+	<h1 class="h-lg">{broadcast.title ?? show.title}</h1>
 	<p class="meta mono">
 		<strong>{fmtDate(broadcast.date)}</strong>
 		· {fmtTime(broadcast.start_minutes)}–{fmtTime(
@@ -775,30 +775,32 @@
 				{/if}
 			</button>
 		{/if}
-		<ShowActions
-			showId={show.id}
-			showTitle={`${show.title} — ${fmtDate(broadcast.date)}`}
-			followed={data.followed}
-			user={data.user}
-			episode={{ broadcastId: broadcast.id }}
-			episodeSaved={data.savedEpisode}
-			episodeFavourited={data.favourited}
-			favouriteCount={data.favouriteCount}
-			compact
-			hintExternal
-			onHintChange={(h) => (loginHint = h)}
-		/>
-		{#if loginHint?.show}
-			<div class="login-hint hint-row">
-				{loginHint.kind === 'follow'
-					? 'Sign in to follow shows'
-					: loginHint.kind === 'save'
-						? 'Sign in to save broadcasts'
-						: loginHint.kind === 'track'
-							? 'Sign in to save tracks to My Version'
-							: 'Sign in to favourite recordings'} — <a class="hint-link" href="/login">Sign in</a>
-			</div>
-		{/if}
+		<div class="replay-actions">
+			<ShowActions
+				showId={show.id}
+				showTitle={`${broadcast.title ?? show.title} — ${fmtDate(broadcast.date)}`}
+				followed={data.followed}
+				user={data.user}
+				episode={{ broadcastId: broadcast.id }}
+				episodeSaved={data.savedEpisode}
+				episodeFavourited={data.favourited}
+				favouriteCount={data.favouriteCount}
+				compact
+				hintExternal
+				onHintChange={(h) => (loginHint = h)}
+			/>
+			{#if loginHint?.show}
+				<div class="login-hint hint-row">
+					{loginHint.kind === 'follow'
+						? 'Sign in to follow shows'
+						: loginHint.kind === 'save'
+							? 'Sign in to save broadcasts'
+							: loginHint.kind === 'track'
+								? 'Sign in to save tracks to My Version'
+								: 'Sign in to favourite recordings'} — <a class="hint-link" href="/login">Sign in</a>
+				</div>
+			{/if}
+		</div>
 	</div>
 	{#if replayPlayable}
 		<EpisodeWaveform
@@ -1283,11 +1285,41 @@
 	}
 
 	.replay {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: auto 1fr;
+		grid-template-areas:
+			'art actions'
+			'art replay';
+		align-items: start;
+		column-gap: 0.75rem;
+		row-gap: 0.5rem;
 		margin-bottom: 0.25rem;
+	}
+
+	.replay > .art-btn,
+	.replay > .replay-art {
+		grid-area: art;
+	}
+
+	/* Actions sit above the replay control; alignment flips on phones. */
+	.replay > .replay-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.4rem;
+		min-width: 0;
+		grid-area: actions;
+	}
+
+	.replay > .replay-actions :global(.actions.compact) {
+		margin-left: 0;
+		align-items: flex-start;
+	}
+
+	.replay > .replay-btn,
+	.replay > .replay-unavailable {
+		grid-area: replay;
+		justify-self: start;
 	}
 
 	.episode-desc {
@@ -1498,6 +1530,16 @@
 	}
 
 	@media (max-width: 640px) {
+		/* Right-align both lines of the actions column on phones. */
+		.replay > .replay-actions {
+			align-items: flex-end;
+		}
+
+		.replay > .replay-btn,
+		.replay > .replay-unavailable {
+			justify-self: end;
+		}
+
 		.card {
 			margin-left: calc(-1 * var(--vr-pad));
 			margin-right: calc(-1 * var(--vr-pad));
