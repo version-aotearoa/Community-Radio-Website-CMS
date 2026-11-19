@@ -405,7 +405,7 @@
 	function replaySource(startAt: number | null = null) {
 		return {
 			url: broadcast.replay_url!,
-			title: show.title,
+			title: broadcast.title ?? show.title,
 			artist: show.kind === 'event' ? null : (show.dj_name ?? null),
 			art: artUrl,
 			show: { id: show.id, title: show.title },
@@ -621,11 +621,11 @@
 </script>
 
 <svelte:head>
-	<title>{show.title} — {fmtDate(broadcast.date)} — Version Radio</title>
+	<title>{broadcast.title ?? show.title} — {fmtDate(broadcast.date)} — Version Radio</title>
 </svelte:head>
 
 <Seo
-	title={`${show.title} — ${fmtDate(broadcast.date)}`}
+	title={`${broadcast.title ?? show.title} — ${fmtDate(broadcast.date)}`}
 	description={show.pageContentText || show.description || undefined}
 	image={artUrl ?? show.image}
 	url={page.url.pathname}
@@ -714,7 +714,7 @@
 		{/if}
 	</div>
 
-	<h1 class="h-lg">{show.title}</h1>
+	<h1 class="h-lg">{broadcast.title ?? show.title}</h1>
 	<p class="meta mono">
 		<strong>{fmtDate(broadcast.date)}</strong>
 		· {fmtTime(broadcast.start_minutes)}–{fmtTime(
@@ -777,7 +777,7 @@
 		{/if}
 		<ShowActions
 			showId={show.id}
-			showTitle={`${show.title} — ${fmtDate(broadcast.date)}`}
+			showTitle={`${broadcast.title ?? show.title} — ${fmtDate(broadcast.date)}`}
 			followed={data.followed}
 			user={data.user}
 			episode={{ broadcastId: broadcast.id }}

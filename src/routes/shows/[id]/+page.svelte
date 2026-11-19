@@ -354,10 +354,19 @@
 				{#each upcoming as b (b.id)}
 					<li class="broadcast" class:today={b.date === data.today}>
 						<header>
-							<strong>{fmtDate(b.date)}</strong>
-							<span class="mono">
-								{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
-							</span>
+							{#if b.title}
+								<strong>{b.title}</strong>
+								<span class="mono">
+									{fmtDate(b.date)} · {fmtTime(b.start_minutes)}–{fmtTime(
+										b.start_minutes + b.duration_minutes
+									)}
+								</span>
+							{:else}
+								<strong>{fmtDate(b.date)}</strong>
+								<span class="mono">
+									{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
+								</span>
+							{/if}
 						{#if data.canEdit}
 							<a
 								class="edit-mini"
@@ -406,7 +415,7 @@
 						<a
 							class="past-art"
 							href={`/shows/${show.id}/${b.id}`}
-							aria-label={`View ${fmtDate(b.date)} episode`}
+							aria-label={`View ${b.title ?? fmtDate(b.date)} episode`}
 						>
 							{#if epArt}
 								<img
@@ -428,7 +437,12 @@
 						</a>
 						<div class="past-body">
 							<header>
-								<strong>{fmtDate(b.date)}</strong>
+								{#if b.title}
+									<strong>{b.title}</strong>
+									<span class="mono">{fmtDate(b.date)}</span>
+								{:else}
+									<strong>{fmtDate(b.date)}</strong>
+								{/if}
 								{#if data.canEdit}
 									<a
 										class="edit-mini"

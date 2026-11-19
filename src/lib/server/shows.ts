@@ -34,6 +34,8 @@ export interface BroadcastRow {
 	duration_minutes: number;
 	interval_weeks: number;
 	replay_url: string | null;
+	/** Optional episode title (migrations/0034); null falls back to the show title. */
+	title: string | null;
 	description: string;
 	featured: number;
 	home_ready: number;
