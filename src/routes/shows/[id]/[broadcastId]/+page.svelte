@@ -1285,17 +1285,41 @@
 	}
 
 	.replay {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: auto 1fr;
+		grid-template-areas:
+			'art actions'
+			'art replay';
+		align-items: start;
+		column-gap: 0.75rem;
+		row-gap: 0.5rem;
 		margin-bottom: 0.25rem;
 	}
 
-	/* Wrapper exists so mobile can stack actions above the replay control;
-	   desktop keeps the single flex row (children lay out as before). */
-	.replay-actions {
-		display: contents;
+	.replay > .art-btn,
+	.replay > .replay-art {
+		grid-area: art;
+	}
+
+	/* Actions sit above the replay control; alignment flips on phones. */
+	.replay > .replay-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.4rem;
+		min-width: 0;
+		grid-area: actions;
+	}
+
+	.replay > .replay-actions :global(.actions.compact) {
+		margin-left: 0;
+		align-items: flex-start;
+	}
+
+	.replay > .replay-btn,
+	.replay > .replay-unavailable {
+		grid-area: replay;
+		justify-self: start;
 	}
 
 	.episode-desc {
@@ -1506,40 +1530,14 @@
 	}
 
 	@media (max-width: 640px) {
-		.replay {
-			display: grid;
-			grid-template-columns: auto 1fr;
-			grid-template-areas:
-				'art actions'
-				'art replay';
-			align-items: start;
-			column-gap: 0.75rem;
-			row-gap: 0.5rem;
-		}
-
-		.replay > .art-btn,
-		.replay > .replay-art {
-			grid-area: art;
-		}
-
+		/* Right-align both lines of the actions column on phones. */
 		.replay > .replay-actions {
-			display: flex;
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 0.4rem;
-			min-width: 0;
-			grid-area: actions;
-		}
-
-		.replay > .replay-actions :global(.actions.compact) {
-			margin-left: 0;
-			align-items: flex-start;
+			align-items: flex-end;
 		}
 
 		.replay > .replay-btn,
 		.replay > .replay-unavailable {
-			grid-area: replay;
-			justify-self: start;
+			justify-self: end;
 		}
 
 		.card {
