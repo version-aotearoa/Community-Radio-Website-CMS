@@ -171,6 +171,12 @@
 		}).format(new Date(`${dateStr}T00:00:00Z`));
 	}
 
+	/** Compact card date: YYYY-MM-DD → DD-MM-YY. */
+	function fmtCardDate(dateStr: string) {
+		const [y, m, d] = dateStr.split('-');
+		return `${d}-${m}-${y.slice(2)}`;
+	}
+
 	function cycleWeeksLabel(): string {
 		const weeks = data.showCycleWeeks;
 		if (weeks.length === 1) return `week ${weeks[0]}`;
@@ -357,12 +363,12 @@
 							{#if b.title}
 								<strong>{b.title}</strong>
 								<span class="mono">
-									{fmtDate(b.date)} · {fmtTime(b.start_minutes)}–{fmtTime(
+									{fmtCardDate(b.date)} · {fmtTime(b.start_minutes)}–{fmtTime(
 										b.start_minutes + b.duration_minutes
 									)}
 								</span>
 							{:else}
-								<strong>{fmtDate(b.date)}</strong>
+								<strong>{fmtCardDate(b.date)}</strong>
 								<span class="mono">
 									{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
 								</span>
@@ -439,9 +445,9 @@
 							<header>
 								{#if b.title}
 									<strong>{b.title}</strong>
-									<span class="mono">{fmtDate(b.date)}</span>
+									<span class="mono">{fmtCardDate(b.date)}</span>
 								{:else}
-									<strong>{fmtDate(b.date)}</strong>
+									<strong>{fmtCardDate(b.date)}</strong>
 								{/if}
 								{#if data.canEdit}
 									<a

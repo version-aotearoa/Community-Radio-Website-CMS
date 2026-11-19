@@ -775,30 +775,32 @@
 				{/if}
 			</button>
 		{/if}
-		<ShowActions
-			showId={show.id}
-			showTitle={`${broadcast.title ?? show.title} — ${fmtDate(broadcast.date)}`}
-			followed={data.followed}
-			user={data.user}
-			episode={{ broadcastId: broadcast.id }}
-			episodeSaved={data.savedEpisode}
-			episodeFavourited={data.favourited}
-			favouriteCount={data.favouriteCount}
-			compact
-			hintExternal
-			onHintChange={(h) => (loginHint = h)}
-		/>
-		{#if loginHint?.show}
-			<div class="login-hint hint-row">
-				{loginHint.kind === 'follow'
-					? 'Sign in to follow shows'
-					: loginHint.kind === 'save'
-						? 'Sign in to save broadcasts'
-						: loginHint.kind === 'track'
-							? 'Sign in to save tracks to My Version'
-							: 'Sign in to favourite recordings'} — <a class="hint-link" href="/login">Sign in</a>
-			</div>
-		{/if}
+		<div class="replay-actions">
+			<ShowActions
+				showId={show.id}
+				showTitle={`${broadcast.title ?? show.title} — ${fmtDate(broadcast.date)}`}
+				followed={data.followed}
+				user={data.user}
+				episode={{ broadcastId: broadcast.id }}
+				episodeSaved={data.savedEpisode}
+				episodeFavourited={data.favourited}
+				favouriteCount={data.favouriteCount}
+				compact
+				hintExternal
+				onHintChange={(h) => (loginHint = h)}
+			/>
+			{#if loginHint?.show}
+				<div class="login-hint hint-row">
+					{loginHint.kind === 'follow'
+						? 'Sign in to follow shows'
+						: loginHint.kind === 'save'
+							? 'Sign in to save broadcasts'
+							: loginHint.kind === 'track'
+								? 'Sign in to save tracks to My Version'
+								: 'Sign in to favourite recordings'} — <a class="hint-link" href="/login">Sign in</a>
+				</div>
+			{/if}
+		</div>
 	</div>
 	{#if replayPlayable}
 		<EpisodeWaveform
@@ -1290,6 +1292,12 @@
 		margin-bottom: 0.25rem;
 	}
 
+	/* Wrapper exists so mobile can stack actions above the replay control;
+	   desktop keeps the single flex row (children lay out as before). */
+	.replay-actions {
+		display: contents;
+	}
+
 	.episode-desc {
 		margin: 0 0 1rem;
 		color: var(--vr-muted);
@@ -1498,6 +1506,42 @@
 	}
 
 	@media (max-width: 640px) {
+		.replay {
+			display: grid;
+			grid-template-columns: auto 1fr;
+			grid-template-areas:
+				'art actions'
+				'art replay';
+			align-items: start;
+			column-gap: 0.75rem;
+			row-gap: 0.5rem;
+		}
+
+		.replay > .art-btn,
+		.replay > .replay-art {
+			grid-area: art;
+		}
+
+		.replay > .replay-actions {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.4rem;
+			min-width: 0;
+			grid-area: actions;
+		}
+
+		.replay > .replay-actions :global(.actions.compact) {
+			margin-left: 0;
+			align-items: flex-start;
+		}
+
+		.replay > .replay-btn,
+		.replay > .replay-unavailable {
+			grid-area: replay;
+			justify-self: start;
+		}
+
 		.card {
 			margin-left: calc(-1 * var(--vr-pad));
 			margin-right: calc(-1 * var(--vr-pad));
