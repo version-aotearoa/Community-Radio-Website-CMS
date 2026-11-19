@@ -356,7 +356,7 @@
 	{#if upcoming.length > 0}
 		<section class="block">
 			<h2 class="h-md">Upcoming</h2>
-			<ul class="broadcasts">
+			<ul class="broadcasts upcoming-list">
 				{#each upcoming as b (b.id)}
 					<li class="broadcast" class:today={b.date === data.today}>
 						<header>
@@ -413,7 +413,7 @@
 {#if past.length > 0}
 		<section class="block">
 			<h2 class="h-md">{show.kind === 'event' ? 'Broadcast recording' : 'Past broadcasts'}</h2>
-			<ul class="broadcasts">
+			<ul class="broadcasts past-list">
 				{#each past as b, i (b.id)}
 					{@const epArt = episodeArtOrDefault(b.id, b, show)}
 					{@const epArtFb = [show.image, show.dj_image]}
@@ -687,6 +687,23 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
+	}
+
+	/* Desktop: the upcoming card takes half the content width, and past
+	   broadcasts sit two-up. Mobile keeps the single full-width column. */
+	@media (min-width: 641px) {
+		.upcoming-list {
+			width: 50%;
+		}
+
+		.past-list {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.past-list > li {
+			min-width: 0;
+		}
 	}
 
 	.broadcast.today {
