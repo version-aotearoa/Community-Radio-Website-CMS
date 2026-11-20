@@ -13,13 +13,15 @@ set -euo pipefail
 PROD_DB="version-radio-db"
 STAGING_DB="version-radio-db-staging"
 
-# Tables in parent-first import order (FK-safe; only follow_show / saved_episode
-# carry real REFERENCES clauses). Auth tables are intentionally skipped so
-# staging sessions stay clean — staging users re-auth via magic link.
-TABLES=(user show broadcast track site_content follow_show saved_episode)
+# Tables in parent-first import order (FK-safe: follow_show, saved_episode,
+# saved_track and favourite_broadcast carry REFERENCES clauses; the rest are
+# plain text keys). Auth tables are intentionally skipped so staging sessions
+# stay clean — staging users re-auth via magic link. d1_migrations and the
+# legacy, always-empty `saved_show` are excluded.
+TABLES=(user show broadcast track site_content news_post follow_show saved_episode saved_track favourite_broadcast news_heart detected_track)
 
 # Child-first delete order (reverse of import) so FK references clear.
-DELETE_ORDER=(saved_episode follow_show track broadcast show user site_content)
+DELETE_ORDER=(detected_track news_heart favourite_broadcast saved_track saved_episode follow_show track broadcast show user site_content news_post)
 
 TMP_SQL="$(mktemp /tmp/staging-sync.XXXXXX.sql)"
 trap 'rm -f "$TMP_SQL"' EXIT
