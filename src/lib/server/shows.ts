@@ -582,6 +582,93 @@ export async function getEpisodeArchive(db: D1Database): Promise<EpisodeListItem
 	return (results as unknown as EpisodeListItem[]).filter((b) => broadcastEnded(now, b));
 }
 
+/** Why an episode matched a track/artist search: count + a few labels. */
+export interface EpisodeMatchSummary {
+	count: number;
+	labels: string[];
+}
+
+/** Track matches for the episode archive, keyed by broadcast id (public only). */
+export async function getEpisodeTrackMatches(
+	db: D1Database,
+	query: string
+): Promise<Record<string, EpisodeMatchSummary>> {
+	const like = `%${query}%`;
+	const { results } = await db
+		.prepare(
+			`SELECT t.broadcast_id, t.title, t.artist
+			 FROM track t
+			 JOIN broadcast b ON b.id = t.broadcast_id
+			 JOIN show s ON s.id = b.show_id
+			 WHERE s.active = 1 AND b.cancelled = 0 AND b.date <= ?
+			   AND (t.title LIKE ? OR t.artist LIKE ?)
+			 ORDER BY b.date DESC, t.position`
+		)
+		.bind(todayStr(), like, like)
+		.all();
+
+	const matches: Record<string, EpisodeMatchSummary> = {};
+	for (const row of results as unknown as Array<{
+		broadcast_id: string;
+		title: string;
+		artist: string;
+	}>) {
+		const summary = (matches[row.broadcast_id] ??= { count: 0, labels: [] });
+		summary.count += 1;
+		if (summary.labels.length < 3) {
+			summary.labels.push(row.artist ? `${row.title} — ${row.artist}` : row.title);
+		}
+	}
+	return matches;
+}
+
+/** Autocomplete suggestions for the episode search: artists and tracks. */
+export interface TrackSearchSuggestions {
+	artists: Array<{ name: string; count: number }>;
+	tracks: Array<{ title: string; artist: string }>;
+}
+
+export async function getTrackSearchSuggestions(
+	db: D1Database,
+	query: string
+): Promise<TrackSearchSuggestions> {
+	const like = `%${query}%`;
+	const [artists, tracks] = await Promise.all([
+		db
+			.prepare(
+				`SELECT t.artist AS name, count(*) AS count
+				 FROM track t
+				 JOIN broadcast b ON b.id = t.broadcast_id
+				 JOIN show s ON s.id = b.show_id
+				 WHERE s.active = 1 AND b.cancelled = 0 AND b.date <= ?
+				   AND t.artist <> '' AND t.artist LIKE ?
+				 GROUP BY lower(t.artist)
+				 ORDER BY count DESC, name ASC
+				 LIMIT 6`
+			)
+			.bind(todayStr(), like)
+			.all(),
+		db
+			.prepare(
+				`SELECT t.title, t.artist
+				 FROM track t
+				 JOIN broadcast b ON b.id = t.broadcast_id
+				 JOIN show s ON s.id = b.show_id
+				 WHERE s.active = 1 AND b.cancelled = 0 AND b.date <= ?
+				   AND (t.title LIKE ? OR t.artist LIKE ?)
+				 ORDER BY b.date DESC, t.position
+				 LIMIT 8`
+			)
+			.bind(todayStr(), like, like)
+			.all()
+	]);
+
+	return {
+		artists: artists.results as unknown as TrackSearchSuggestions['artists'],
+		tracks: tracks.results as unknown as TrackSearchSuggestions['tracks']
+	};
+}
+
 /** Loose name normalisation: lowercase, strip anything but a-z/0-9/spaces. */
 export function normalizeText(s: string): string {
 	return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
