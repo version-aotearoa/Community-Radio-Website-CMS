@@ -12,13 +12,31 @@
 
 	// The viewer's timezone is only known client-side: start in NZ time so SSR
 	// and hydration agree, then honour the saved preference on mount.
-	let mode = $state<'nz' | 'local'>('nz');
+	type Mode = 'nz' | 'gmt' | 'local';
+	let mode = $state<Mode>('nz');
 	let localTz = $state('');
 
 	const isNzViewer = $derived(localTz === '' || localTz === STATION_TZ);
-	const useLocal = $derived(mode === 'local' && !isNzViewer);
 
-	function setMode(next: 'nz' | 'local') {
+	/** NZ viewers get GMT as the alternative; everyone else gets their own zone. */
+	const modeOptions = $derived<Array<{ id: Mode; label: string }>>(
+		isNzViewer
+			? [
+					{ id: 'nz', label: 'NZT' },
+					{ id: 'gmt', label: 'GMT' }
+				]
+			: [
+					{ id: 'nz', label: 'NZT' },
+					{ id: 'local', label: 'local' }
+				]
+	);
+
+	// A stored mode that isn't offered (e.g. 'local' while in NZ) falls back to NZ.
+	const activeMode = $derived(modeOptions.some((option) => option.id === mode) ? mode : 'nz');
+	const useGmt = $derived(activeMode === 'gmt');
+	const useLocal = $derived(activeMode === 'local');
+
+	function setMode(next: Mode) {
 		mode = next;
 		try {
 			localStorage.setItem(MODE_KEY, next);
@@ -29,7 +47,8 @@
 
 	$effect(() => {
 		try {
-			if (localStorage.getItem(MODE_KEY) === 'local') mode = 'local';
+			const stored = localStorage.getItem(MODE_KEY);
+			if (stored === 'nz' || stored === 'gmt' || stored === 'local') mode = stored;
 		} catch {
 			// storage unavailable
 		}
@@ -57,21 +76,34 @@
 		month: '2-digit',
 		day: '2-digit'
 	});
+	const utcDay = new Intl.DateTimeFormat('en-CA', {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		timeZone: 'UTC'
+	});
 
 	function localDateKey(ms: number): string {
 		return localDay.format(ms);
 	}
 
-	/** Calendar day a slot appears under: the station date, or the viewer's local date. */
+	/** Calendar day a slot appears under: station date, UTC date, or viewer's date. */
 	function displayDate(slot: Slot): string {
-		return useLocal ? localDateKey(slot.startMs) : slot.date;
+		if (useGmt) return utcDay.format(slot.startMs);
+		if (useLocal) return localDateKey(slot.startMs);
+		return slot.date;
 	}
 
-	const todayKey = $derived(
-		nowMs === null ? data.today : useLocal ? localDateKey(nowMs) : data.today
-	);
+	/** Today/tomorrow key in whichever calendar the active mode uses. */
+	function keyFor(ms: number, stationFallback: string): string {
+		if (useGmt) return utcDay.format(ms);
+		if (useLocal) return localDateKey(ms);
+		return stationFallback;
+	}
+
+	const todayKey = $derived(nowMs === null ? data.today : keyFor(nowMs, data.today));
 	const tomorrowKey = $derived(
-		nowMs === null ? data.tomorrow : useLocal ? localDateKey(nowMs + 86_400_000) : data.tomorrow
+		nowMs === null ? data.tomorrow : keyFor(nowMs + 86_400_000, data.tomorrow)
 	);
 
 	// Earliest broadcast that hasn't started yet; advances as each one begins.
@@ -171,15 +203,39 @@
 		minute: '2-digit',
 		hourCycle: 'h23'
 	});
+	const utcTimeFmt = new Intl.DateTimeFormat('en-NZ', {
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23',
+		timeZone: 'UTC'
+	});
 
-	/** Station wall-clock time, or the viewer's local time, for one slot. */
+	/** Slot times in whichever zone the active mode uses. */
 	function slotTime(slot: Slot): string {
-		if (!useLocal) {
-			return `${fmtTime(slot.start_minutes)}–${fmtTime(slot.start_minutes + slot.duration_minutes)}`;
+		if (useGmt || useLocal) {
+			const fmt = useGmt ? utcTimeFmt : localTimeFmt;
+			const endMs = slot.startMs + slot.duration_minutes * 60_000;
+			return `${fmt.format(slot.startMs)}–${fmt.format(endMs)}`;
 		}
-		const endMs = slot.startMs + slot.duration_minutes * 60_000;
-		return `${localTimeFmt.format(slot.startMs)}–${localTimeFmt.format(endMs)}`;
+		return `${fmtTime(slot.start_minutes)}–${fmtTime(slot.start_minutes + slot.duration_minutes)}`;
 	}
+
+	const clockOpts = {
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hourCycle: 'h23'
+	} as const;
+	const nzClockFmt = new Intl.DateTimeFormat('en-NZ', { ...clockOpts, timeZone: STATION_TZ });
+	const utcClockFmt = new Intl.DateTimeFormat('en-NZ', { ...clockOpts, timeZone: 'UTC' });
+	const localClockFmt = new Intl.DateTimeFormat(undefined, clockOpts);
+
+	const clockText = $derived.by(() => {
+		const t = nowMs;
+		if (t === null) return '';
+		return (useGmt ? utcClockFmt : useLocal ? localClockFmt : nzClockFmt).format(t);
+	});
+	const clockZone = $derived(useGmt ? 'GMT' : useLocal ? localTz || 'local' : 'NZT');
 
 	function fmtCountdown(ms: number): string {
 		const total = Math.max(0, Math.floor(ms / 1000));
@@ -203,22 +259,33 @@
 	<header class="head">
 		<div class="head-top">
 			<h1 class="h-lg">Schedule</h1>
-			{#if !isNzViewer}
+			<div class="head-controls">
+				{#if nowMs !== null}
+					<span class="clock mono">
+						{clockText}
+						<span class="clock-zone">{clockZone}</span>
+					</span>
+				{/if}
 				<div class="tz-toggle" role="group" aria-label="Time zone">
-					<button class="tz-btn" class:active={!useLocal} onclick={() => setMode('nz')}>
-						NZ time
-					</button>
-					<button class="tz-btn" class:active={useLocal} onclick={() => setMode('local')}>
-						My time
-					</button>
+					{#each modeOptions as option (option.id)}
+						<button
+							class="tz-btn"
+							class:active={activeMode === option.id}
+							onclick={() => setMode(option.id)}
+						>
+							{option.label}
+						</button>
+					{/each}
 				</div>
-			{/if}
+			</div>
 		</div>
 		<p class="subtitle mono">
-			{#if useLocal}
+			{#if useGmt}
+				Next 30 days of broadcasts. Times in GMT (UTC).
+			{:else if useLocal}
 				Next 30 days of broadcasts. Times in your local time ({localTz}).
 			{:else}
-				Next 30 days of broadcasts. All times local (NZ).
+				Next 30 days of broadcasts. Times in NZ (Pacific/Auckland).
 			{/if}
 		</p>
 	</header>
@@ -307,6 +374,27 @@
 	.tz-toggle {
 		display: flex;
 		gap: 0.35rem;
+	}
+
+	.head-controls {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.clock {
+		color: var(--vr-muted);
+		font-size: 0.8rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.clock-zone {
+		color: var(--vr-faint);
+		font-size: 0.7rem;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		margin-left: 0.25rem;
 	}
 
 	.tz-btn {
