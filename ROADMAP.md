@@ -39,3 +39,29 @@
 2. Standalone `push-worker` deployed like `chat-worker` — OK?
 3. Opt-in model: per-show bell + account Notifications tab, never a blanket prompt — OK?
 4. Android/desktop-only for now (push-only SW, zero caching), iOS push parked — OK?
+
+## Editable episode date & time (planned — not started)
+
+Goal: correct a broadcast's **date**, **start time** and **duration** from the tracklist editor's Episode tab. Scope is one-off events and **archived** (past) episodes — not rescheduling upcoming recurring slots.
+
+### Constraints
+
+- **Unique slot.** `broadcast` is `UNIQUE (show_id, date)`; a re-dated episode can collide with an existing row. Reject with a clear 409 rather than letting the constraint surface.
+- **Ghost regeneration.** `ensureBroadcasts()` walks from `show.anchor_date` and `INSERT OR IGNORE`s every slot up to the horizon, *including past ones* (`/shows/[id]`, `/schedule`, tracklist save). Moving an archived episode therefore re-creates an empty episode on the vacated slot. Fix: default the generation window to start at `todayStr()`, reusing the phase-preserving walk the `fromDate` branch already does. Every caller already means "materialise upcoming broadcasts".
+- **Ids embed the date.** Episode ids are `<show>-<date>`, so a date change leaves a stale id/URL. Keep the id (URL stability); renaming stays a separate action via the Episode ID field.
+- **Chat room key includes the date** (`episode:<showId>:<date>`), so a re-dated episode starts a fresh room and its old history stays in the Durable Object.
+- **Permissions.** Show-level date/time edits are admin-only today (`/api/shows/[id]` gates `dayOfWeek`/`startMinutes`/`durationMinutes` behind `isAdmin`), while the episode editor (id/description/replay) is DJ-editable.
+
+### Plan
+
+- `PUT /api/shows/[id]/broadcasts/[broadcastId]/schedule`, mirroring the `slug`/`description`/`replay` routes: validate `date` (`YYYY-MM-DD`, real calendar date), `startMinutes` (0–1439), `durationMinutes` (1–1440); allow a date change only for events or episodes whose current date is in the past; 409 on slot collisions; write only changed columns + `updated_at`.
+- TracklistEditor Episode tab: a "Date & time" block (date, time → minutes, duration) above "Episode ID", using the existing save/error/notice pattern, then `invalidateAll()` so the header and `<title>` refresh. Disable the date field on upcoming recurring episodes with a hint; note the chat-room effect.
+- `ensureBroadcasts()`: default `fromDate` to `todayStr()`.
+- No schema change or migration.
+- Staging checks: re-date the 2005 HIFI Sessions episode and a test recurring archive episode; confirm no ghost row, collision 409, and future-date rejection.
+
+### Open questions
+
+1. Admin-only, or DJs for their own show too?
+2. Include duration in the same block? (assumed yes)
+3. OK to change `ensureBroadcasts()` to today-forward generation?
