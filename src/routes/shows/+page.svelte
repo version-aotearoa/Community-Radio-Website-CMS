@@ -83,6 +83,118 @@
 		return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
 	}
 
+	// ---- Episodes search: autocomplete over tracks/artists, episode results ----
+	type Suggestion = { kind: 'artist' | 'track'; value: string; sub: string };
+
+	let searchInput = $state('');
+	let suggestions = $state<{
+		artists: Array<{ name: string; count: number }>;
+		tracks: Array<{ title: string; artist: string }>;
+	}>({ artists: [], tracks: [] });
+	let suggestionsOpen = $state(false);
+	let activeSuggestion = $state(-1);
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	let suggestTimer: ReturnType<typeof setTimeout> | null = null;
+	let suggestController: AbortController | null = null;
+
+	const flatSuggestions = $derived<Suggestion[]>([
+		...suggestions.artists.map((a) => ({
+			kind: 'artist' as const,
+			value: a.name,
+			sub: `${a.count} track${a.count === 1 ? '' : 's'}`
+		})),
+		...suggestions.tracks.map((t) => ({
+			kind: 'track' as const,
+			value: t.title,
+			sub: t.artist
+		}))
+	]);
+
+	// Keep the field in step with the URL (back/forward, cleared search).
+	$effect(() => {
+		searchInput = data.q ?? '';
+	});
+
+	function applySearch(value: string) {
+		const params = new URLSearchParams();
+		params.set('view', 'episodes');
+		const q = value.trim();
+		if (q) params.set('q', q);
+		void goto(`/shows?${params}`, { replaceState: true, noScroll: true, keepFocus: true });
+	}
+
+	function onSearchInput() {
+		suggestionsOpen = true;
+		activeSuggestion = -1;
+		if (searchTimer) clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => applySearch(searchInput), 300);
+		if (suggestTimer) clearTimeout(suggestTimer);
+		suggestTimer = setTimeout(() => void loadSuggestions(), 150);
+	}
+
+	async function loadSuggestions() {
+		const q = searchInput.trim();
+		if (q.length < 2) {
+			suggestions = { artists: [], tracks: [] };
+			return;
+		}
+		suggestController?.abort();
+		suggestController = new AbortController();
+		try {
+			const res = await fetch(`/api/search/suggest?q=${encodeURIComponent(q)}`, {
+				signal: suggestController.signal
+			});
+			if (!res.ok) return;
+			suggestions = (await res.json()) as typeof suggestions;
+		} catch {
+			// aborted by a newer keystroke
+		}
+	}
+
+	function pickSuggestion(index: number) {
+		const picked = flatSuggestions[index];
+		if (!picked) return;
+		searchInput = picked.value;
+		suggestionsOpen = false;
+		applySearch(picked.value);
+	}
+
+	function clearSearch() {
+		searchInput = '';
+		suggestions = { artists: [], tracks: [] };
+		suggestionsOpen = false;
+		applySearch('');
+	}
+
+	function onSearchKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			suggestionsOpen = false;
+			return;
+		}
+		if (!suggestionsOpen || flatSuggestions.length === 0) {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				applySearch(searchInput);
+				suggestionsOpen = false;
+			}
+			return;
+		}
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			activeSuggestion = (activeSuggestion + 1) % flatSuggestions.length;
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			activeSuggestion = activeSuggestion <= 0 ? flatSuggestions.length - 1 : activeSuggestion - 1;
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			if (activeSuggestion >= 0) pickSuggestion(activeSuggestion);
+			else {
+				applySearch(searchInput);
+				suggestionsOpen = false;
+			}
+		}
+	}
+
 	const filtered = $derived(
 		filter === 'all'
 			? allShows
@@ -181,6 +293,55 @@
 
 	{#if isEpisodes}
 		<div class="toolbar">
+			<div class="search-wrap">
+				<input
+					class="search-input"
+					type="text"
+					placeholder="Search tracks or artists"
+					bind:value={searchInput}
+					oninput={onSearchInput}
+					onkeydown={onSearchKeydown}
+					onfocus={() => (suggestionsOpen = true)}
+					onblur={() => setTimeout(() => (suggestionsOpen = false), 150)}
+					role="combobox"
+					aria-expanded={suggestionsOpen && flatSuggestions.length > 0}
+					aria-controls="episode-suggestions"
+					aria-autocomplete="list"
+					aria-activedescendant={activeSuggestion >= 0
+						? `episode-suggestion-${activeSuggestion}`
+						: undefined}
+				/>
+				{#if searchInput}
+					<button class="search-clear" type="button" onclick={clearSearch} aria-label="Clear search"
+						>×</button
+					>
+				{/if}
+				{#if suggestionsOpen && flatSuggestions.length > 0}
+					<ul class="suggestions" id="episode-suggestions" role="listbox">
+						{#each flatSuggestions as s, i (s.kind + s.value + i)}
+							<li
+								id={`episode-suggestion-${i}`}
+								role="option"
+								aria-selected={activeSuggestion === i}
+								class:active={activeSuggestion === i}
+							>
+								<button
+									type="button"
+									class="suggestion"
+									onmousedown={(e) => {
+										e.preventDefault();
+										pickSuggestion(i);
+									}}
+								>
+									<span class="sug-tag mono">{s.kind === 'artist' ? 'Artist' : 'Track'}</span>
+									<span class="sug-value">{s.value}</span>
+									{#if s.sub}<span class="sug-sub mono">{s.sub}</span>{/if}
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
 			<div class="filter-stack">
 				<div class="sort-control">
 					<label class="sort-label mono" for="episode-show">Show</label>
@@ -202,12 +363,18 @@
 				</div>
 			</div>
 			<span class="empty mono">
-				{visibleEpisodes.length} episode{visibleEpisodes.length === 1 ? '' : 's'}
+				{#if data.q}
+					{visibleEpisodes.length} matching episode{visibleEpisodes.length === 1 ? '' : 's'}
+				{:else}
+					{visibleEpisodes.length} episode{visibleEpisodes.length === 1 ? '' : 's'}
+				{/if}
 			</span>
 		</div>
 
 		{#if visibleEpisodes.length === 0}
-			<p class="empty mono">No episodes yet.</p>
+			<p class="empty mono">
+				{data.q ? `No episodes contain “${data.q}”.` : 'No episodes yet.'}
+			</p>
 		{:else}
 			<ul class="episode-list">
 				{#each visibleEpisodes as e (e.id)}
@@ -215,7 +382,16 @@
 						<a class="episode-row" href={`/shows/${e.show_id}/${e.id}`}>
 							<span class="ep-date mono">{fmtCardDate(e.date)}</span>
 							<span class="ep-show mono">{e.show_title}</span>
-							<span class="ep-title">{e.episode_title ?? e.show_title}</span>
+							<span class="ep-main">
+								<span class="ep-title">{e.episode_title ?? e.show_title}</span>
+								{#if e.count}
+									<span class="ep-match mono"
+										>{e.count} matching track{e.count === 1 ? '' : 's'} · {e.labels?.join(
+											' · '
+										)}</span
+									>
+								{/if}
+							</span>
 							<span class="ep-meta mono">
 								{#if e.replay_url}▶ Replay · {/if}{fmtDuration(e.duration_minutes)}
 							</span>
@@ -589,6 +765,135 @@
 		white-space: nowrap;
 	}
 
+	.ep-main {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		min-width: 0;
+	}
+
+	.ep-match {
+		color: var(--vr-muted);
+		font-size: 0.72rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* ---- Episodes search: input + autocomplete ---- */
+	.search-wrap {
+		position: relative;
+		flex: 1 1 20rem;
+		min-width: 15rem;
+		max-width: 32rem;
+	}
+
+	.search-input {
+		width: 100%;
+		box-sizing: border-box;
+		background: var(--vr-surface-low);
+		color: var(--vr-text);
+		border: 1px solid var(--vr-line);
+		padding: 0.5rem 2rem 0.5rem 0.6rem;
+		font-family: var(--vr-font-mono);
+		font-size: 0.75rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.search-input::placeholder {
+		color: var(--vr-faint);
+		text-transform: none;
+		letter-spacing: 0;
+	}
+
+	.search-input:focus {
+		outline: none;
+		border-color: var(--vr-text);
+	}
+
+	.search-clear {
+		position: absolute;
+		top: 50%;
+		right: 0.35rem;
+		transform: translateY(-50%);
+		background: none;
+		border: none;
+		color: var(--vr-muted);
+		font-size: 1.1rem;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0.15rem 0.3rem;
+	}
+
+	.search-clear:hover {
+		color: var(--vr-text);
+	}
+
+	.suggestions {
+		position: absolute;
+		z-index: 20;
+		top: calc(100% + 0.25rem);
+		left: 0;
+		right: 0;
+		margin: 0;
+		padding: 0.25rem 0;
+		list-style: none;
+		background: var(--vr-surface);
+		border: 1px solid var(--vr-line);
+		max-height: 16rem;
+		overflow-y: auto;
+		box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+	}
+
+	.suggestions li.active,
+	.suggestions li:hover {
+		background: var(--vr-surface-high);
+	}
+
+	.suggestion {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.45rem 0.6rem;
+		background: none;
+		border: none;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.sug-tag {
+		flex-shrink: 0;
+		color: var(--vr-faint);
+		font-size: 0.65rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		width: 3.2rem;
+	}
+
+	.sug-value {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-weight: 600;
+	}
+
+	.sug-sub {
+		flex-shrink: 0;
+		color: var(--vr-muted);
+		font-size: 0.72rem;
+		max-width: 45%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.ep-meta {
 		color: var(--vr-muted);
 		white-space: nowrap;
@@ -652,13 +957,22 @@
 			grid-area: meta;
 		}
 
-		.ep-title {
+		.ep-main {
 			grid-area: title;
+		}
+
+		.ep-title {
 			white-space: normal;
 		}
 
 		.ep-show {
 			grid-area: show;
+		}
+
+		.search-wrap {
+			flex: 1 1 100%;
+			max-width: none;
+			min-width: 0;
 		}
 
 		/* Fill the cell so a card with a two-line title doesn't end above its
