@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { page } from '$app/state';
+	import ArrowChip from '$lib/components/ArrowChip.svelte';
 
 	import {
 		autoplay,
@@ -1169,7 +1170,7 @@
 					{/if}
 				{:else}
 					{#if media?.show}
-						<a class="showlink mono" href={media.href ?? `/shows/${media.show.id}`}>{media.show.title} <span class="arrow-chip" aria-hidden="true">→︎</span></a>
+						<a class="showlink mono" href={media.href ?? `/shows/${media.show.id}`}>{media.show.title} <ArrowChip dir="right" /></a>
 					{/if}
 				{/if}
 			</div>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Seo from '$lib/components/Seo.svelte';
+	import ArrowChip from '$lib/components/ArrowChip.svelte';
 	import NewsActions from '$lib/components/NewsActions.svelte';
 	import { SITE_TITLE } from '$lib/site';
 
@@ -23,7 +24,7 @@
 <Seo title={`${post.title} — ${SITE_TITLE}`} description={data.excerpt} image={post.image} />
 
 <div class="page">
-	<a class="back mono" href="/news"><span class="arrow-chip" aria-hidden="true">←︎</span> News</a>
+	<a class="back mono" href="/news"><ArrowChip dir="left" /> News</a>
 
 	<article class="article">
 		<p class="mono meta">
