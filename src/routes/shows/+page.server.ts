@@ -1,6 +1,7 @@
 import {
 	getEpisodeArchive,
 	getEpisodeTrackMatches,
+	getPublicTrackCount,
 	getSchedule,
 	type EpisodeListItem,
 	type EpisodeMatchSummary
@@ -15,7 +16,9 @@ export const load: PageServerLoad = async ({ url, platform }) => {
 	const q = (url.searchParams.get('q') ?? '').trim().slice(0, 80);
 
 	let episodes: Array<EpisodeListItem & Partial<EpisodeMatchSummary>> = [];
+	let trackTotal = 0;
 	if (view === 'episodes') {
+		trackTotal = await getPublicTrackCount(db);
 		const archive = await getEpisodeArchive(db);
 		if (q.length >= MIN_QUERY) {
 			const matches = await getEpisodeTrackMatches(db, q);
@@ -30,6 +33,7 @@ export const load: PageServerLoad = async ({ url, platform }) => {
 	return {
 		view,
 		q,
+		trackTotal,
 		shows: await getSchedule(db),
 		episodes
 	};

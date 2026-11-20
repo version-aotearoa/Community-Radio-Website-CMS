@@ -669,6 +669,20 @@ export async function getTrackSearchSuggestions(
 	};
 }
 
+/** Count of tracks listeners can search: active shows, non-cancelled episodes. */
+export async function getPublicTrackCount(db: D1Database): Promise<number> {
+	const row = await db
+		.prepare(
+			`SELECT count(*) AS n
+			 FROM track t
+			 JOIN broadcast b ON b.id = t.broadcast_id
+			 JOIN show s ON s.id = b.show_id
+			 WHERE s.active = 1 AND b.cancelled = 0`
+		)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
 /** Loose name normalisation: lowercase, strip anything but a-z/0-9/spaces. */
 export function normalizeText(s: string): string {
 	return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
