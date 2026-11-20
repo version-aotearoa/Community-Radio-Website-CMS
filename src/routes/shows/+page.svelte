@@ -62,6 +62,14 @@
 		)
 	);
 
+	const searchPlaceholder = $derived(
+		data.trackTotal > 0
+			? `Search ${data.trackTotal} track${data.trackTotal === 1 ? '' : 's'}/artist${
+					data.trackTotal === 1 ? '' : 's'
+				}`
+			: 'Search tracks/artists'
+	);
+
 	function setView(next: 'shows' | 'episodes') {
 		if ((next === 'episodes') === isEpisodes) return;
 		void goto(next === 'episodes' ? '/shows?view=episodes' : '/shows', {
@@ -297,7 +305,7 @@
 				<input
 					class="search-input"
 					type="text"
-					placeholder="Search tracks or artists"
+					placeholder={searchPlaceholder}
 					bind:value={searchInput}
 					oninput={onSearchInput}
 					onkeydown={onSearchKeydown}
