@@ -5,13 +5,36 @@
 
 	let { data } = $props();
 
+	const STATION_TZ = 'Pacific/Auckland';
+	const MODE_KEY = 'vr-schedule-time-mode';
+
 	const upcoming = $derived(data.upcoming);
 
-	// Start instants are static per broadcast; convert once so the ticking
-	// countdown below only has to compare against the current time.
-	const starts = $derived(
-		upcoming.map((b) => ({ date: b.date, startMs: zonedWallTimeToUtcMs(b.date, b.start_minutes) }))
-	);
+	// The viewer's timezone is only known client-side: start in NZ time so SSR
+	// and hydration agree, then honour the saved preference on mount.
+	let mode = $state<'nz' | 'local'>('nz');
+	let localTz = $state('');
+
+	const isNzViewer = $derived(localTz === '' || localTz === STATION_TZ);
+	const useLocal = $derived(mode === 'local' && !isNzViewer);
+
+	function setMode(next: 'nz' | 'local') {
+		mode = next;
+		try {
+			localStorage.setItem(MODE_KEY, next);
+		} catch {
+			// storage unavailable
+		}
+	}
+
+	$effect(() => {
+		try {
+			if (localStorage.getItem(MODE_KEY) === 'local') mode = 'local';
+		} catch {
+			// storage unavailable
+		}
+		localTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+	});
 
 	// Null until mounted so the SSR/first paint is identical to hydration.
 	let nowMs = $state<number | null>(null);
@@ -22,11 +45,40 @@
 		return () => clearInterval(id);
 	});
 
+	/** Broadcast plus its absolute start instant (shared by countdowns and local times). */
+	type Slot = (typeof upcoming)[number] & { startMs: number };
+
+	const slots = $derived(
+		upcoming.map((b) => ({ ...b, startMs: zonedWallTimeToUtcMs(b.date, b.start_minutes) }))
+	);
+
+	const localDay = new Intl.DateTimeFormat('en-CA', {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit'
+	});
+
+	function localDateKey(ms: number): string {
+		return localDay.format(ms);
+	}
+
+	/** Calendar day a slot appears under: the station date, or the viewer's local date. */
+	function displayDate(slot: Slot): string {
+		return useLocal ? localDateKey(slot.startMs) : slot.date;
+	}
+
+	const todayKey = $derived(
+		nowMs === null ? data.today : useLocal ? localDateKey(nowMs) : data.today
+	);
+	const tomorrowKey = $derived(
+		nowMs === null ? data.tomorrow : useLocal ? localDateKey(nowMs + 86_400_000) : data.tomorrow
+	);
+
 	// Earliest broadcast that hasn't started yet; advances as each one begins.
 	const next = $derived.by(() => {
 		const t = nowMs;
 		if (t === null) return null;
-		return starts.find((s) => s.startMs > t) ?? null;
+		return slots.find((s) => s.startMs > t) ?? null;
 	});
 
 	interface Day {
@@ -34,7 +86,7 @@
 		label: string;
 		today: boolean;
 		tomorrow: boolean;
-		items: typeof upcoming;
+		items: Slot[];
 	}
 
 	interface Week {
@@ -45,22 +97,26 @@
 	}
 
 	const days = $derived.by<Day[]>(() => {
-		const groups = new Map<string, typeof upcoming>();
-		for (const b of upcoming) {
-			const list = groups.get(b.date) ?? [];
-			list.push(b);
-			groups.set(b.date, list);
+		const groups = new Map<string, Slot[]>();
+		for (const slot of slots) {
+			const key = displayDate(slot);
+			const list = groups.get(key) ?? [];
+			list.push(slot);
+			groups.set(key, list);
 		}
-		return Array.from(groups.entries()).map(([date, items]) => ({
-			date,
-			label: formatDate(date),
-			today: date === data.today,
-			tomorrow: date === data.tomorrow,
-			items
-		}));
+		return Array.from(groups.entries())
+			.map(([date, items]) => ({
+				date,
+				label: formatDate(date),
+				today: date === todayKey,
+				tomorrow: date === tomorrowKey,
+				items
+			}))
+			.sort((a, b) => a.items[0].startMs - b.items[0].startMs);
 	});
 
-	// Mon–Sun calendar weeks; each divider is labelled with its station cycle week.
+	// Mon–Sun weeks; the divider still names the station's 4-week cycle, computed
+	// from the first broadcast's station date.
 	const weeks = $derived.by<Week[]>(() => {
 		const groups = new Map<string, Day[]>();
 		for (const day of days) {
@@ -69,12 +125,14 @@
 			list.push(day);
 			groups.set(monday, list);
 		}
-		return Array.from(groups.entries()).map(([monday, weekDays]) => ({
-			monday,
-			cycleWeek: cycleWeekOf(monday),
-			range: formatWeekRange(monday),
-			days: weekDays
-		}));
+		return Array.from(groups.entries())
+			.map(([monday, weekDays]) => ({
+				monday,
+				cycleWeek: cycleWeekOf(weekDays[0].items[0].date),
+				range: formatWeekRange(monday),
+				days: weekDays
+			}))
+			.sort((a, b) => a.monday.localeCompare(b.monday));
 	});
 
 	function formatDate(dateStr: string) {
@@ -108,6 +166,21 @@
 		return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 	}
 
+	const localTimeFmt = new Intl.DateTimeFormat(undefined, {
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23'
+	});
+
+	/** Station wall-clock time, or the viewer's local time, for one slot. */
+	function slotTime(slot: Slot): string {
+		if (!useLocal) {
+			return `${fmtTime(slot.start_minutes)}–${fmtTime(slot.start_minutes + slot.duration_minutes)}`;
+		}
+		const endMs = slot.startMs + slot.duration_minutes * 60_000;
+		return `${localTimeFmt.format(slot.startMs)}–${localTimeFmt.format(endMs)}`;
+	}
+
 	function fmtCountdown(ms: number): string {
 		const total = Math.max(0, Math.floor(ms / 1000));
 		const h = Math.floor(total / 3600);
@@ -128,8 +201,26 @@
 
 <div class="page">
 	<header class="head">
-		<h1 class="h-lg">Schedule</h1>
-		<p class="subtitle mono">Next 30 days of broadcasts. All times local (NZ).</p>
+		<div class="head-top">
+			<h1 class="h-lg">Schedule</h1>
+			{#if !isNzViewer}
+				<div class="tz-toggle" role="group" aria-label="Time zone">
+					<button class="tz-btn" class:active={!useLocal} onclick={() => setMode('nz')}>
+						NZ time
+					</button>
+					<button class="tz-btn" class:active={useLocal} onclick={() => setMode('local')}>
+						My time
+					</button>
+				</div>
+			{/if}
+		</div>
+		<p class="subtitle mono">
+			{#if useLocal}
+				Next 30 days of broadcasts. Times in your local time ({localTz}).
+			{:else}
+				Next 30 days of broadcasts. All times local (NZ).
+			{/if}
+		</p>
 	</header>
 
 	{#if days.length === 0}
@@ -148,14 +239,14 @@
 									{day.label}
 									{#if day.today}
 										<span class="sticker">Today</span>
-										{#if nowMs !== null && next?.date === data.today}
+										{#if nowMs !== null && next !== null && displayDate(next) === day.date}
 											<span class="countdown">
 												next in {fmtCountdown(next.startMs - nowMs)}
 											</span>
 										{/if}
 									{:else if day.tomorrow}
 										<span class="sticker">Tomorrow</span>
-										{#if nowMs !== null && next?.date === data.tomorrow}
+										{#if nowMs !== null && next !== null && displayDate(next) === day.date}
 											<span class="countdown">
 												next in {fmtCountdown(next.startMs - nowMs)}
 											</span>
@@ -171,7 +262,7 @@
 												{#if b.onair}
 													<span class="live-dot" aria-hidden="true"></span>
 												{/if}
-												{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
+												{slotTime(b)}
 											</span>
 											<span class="show-title h-sm">{b.title}</span>
 											{#if b.dj_name && b.kind !== 'event'}
@@ -203,6 +294,42 @@
 
 	.head h1 {
 		margin: 0;
+	}
+
+	.head-top {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.tz-toggle {
+		display: flex;
+		gap: 0.35rem;
+	}
+
+	.tz-btn {
+		background: none;
+		border: 1px solid var(--vr-line);
+		color: var(--vr-muted);
+		font-family: var(--vr-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		padding: 0.3rem 0.6rem;
+		cursor: pointer;
+	}
+
+	.tz-btn:hover {
+		color: var(--vr-text);
+		border-color: var(--vr-text);
+	}
+
+	.tz-btn.active {
+		background: var(--vr-text);
+		color: var(--vr-black);
+		border-color: var(--vr-text);
 	}
 
 	.subtitle {
