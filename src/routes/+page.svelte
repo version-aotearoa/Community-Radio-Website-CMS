@@ -9,6 +9,7 @@
 	import { eventTypeLabel } from '$lib/eventTypes';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
+	import ArrowChip from '$lib/components/ArrowChip.svelte';
 	import { SITE_TITLE } from '$lib/site';
 
 	let { data } = $props();
@@ -218,7 +219,7 @@
 								<span class="news-teaser">{post.bodyText.slice(0, 90)}</span>
 							{/if}
 						</span>
-						<span class="arrow-chip" aria-hidden="true">→︎</span>
+						<ArrowChip dir="right" />
 					</a>
 				</li>
 			{/each}
@@ -238,15 +239,15 @@
 		<div class="linkrows">
 			<a class="linkrow" href="/chat">
 				<span class="h-sm">Join the community chat</span>
-				<span class="arrow-chip" aria-hidden="true">→︎</span>
+				<ArrowChip dir="right" />
 			</a>
 			<a class="linkrow" href="/schedule">
 				<span class="h-sm">See what's on</span>
-				<span class="arrow-chip" aria-hidden="true">→︎</span>
+				<ArrowChip dir="right" />
 			</a>
 			<a class="linkrow" href={data.user ? '/account' : '/login'}>
 				<span class="h-sm">Sign in &gt; My Version</span>
-				<span class="arrow-chip" aria-hidden="true">→︎</span>
+				<ArrowChip dir="right" />
 			</a>
 		</div>
 	</div>
@@ -697,7 +698,7 @@
 		height: auto;
 	}
 
-	.news-row .arrow-chip {
+	.news-row :global(.arrow-chip) {
 		margin-left: auto;
 		flex-shrink: 0;
 	}

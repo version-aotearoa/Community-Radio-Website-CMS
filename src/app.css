@@ -134,26 +134,26 @@ img {
 	text-transform: uppercase;
 }
 
-/* Bracketed mono arrow chip for link affordances. VS15 (text presentation)
-   keeps U+2190/2192/2197 from rendering as colour emoji on mobile. The chip is
-   an inline-flex box so the arrow stays optically centred inside its border. */
+/* Bracketed mono arrow chip for link affordances. The arrow is an inline SVG
+   (see ArrowChip.svelte) so its ink stays optically centred at every size. */
 .arrow-chip {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	min-width: 1.15em;
 	min-height: 1.15em;
-	font-family: var(--vr-font-mono);
 	font-size: 0.78em;
-	font-weight: 500;
 	line-height: 1;
-	letter-spacing: 0.05em;
-	white-space: nowrap;
-	vertical-align: -0.06em;
 	padding: 0.08em 0.28em;
 	border: 1px solid currentColor;
 	cursor: pointer;
-	font-variant-emoji: text;
+	white-space: nowrap;
+}
+
+.arrow-chip svg {
+	display: block;
+	width: 0.9em;
+	height: 0.9em;
 }
 
 @media (max-width: 720px) {

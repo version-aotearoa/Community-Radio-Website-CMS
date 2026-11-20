@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { Text, Field, Button } from '@svar-ui/svelte-core';
 	import ShowActions from '$lib/components/ShowActions.svelte';
+	import ArrowChip from '$lib/components/ArrowChip.svelte';
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import { playback, playMedia, requestSetPlaying, streamPlaying } from '$lib/stores/player';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
@@ -242,7 +243,7 @@
 <div class="page">
 	<header class="head">
 		<div>
-			<a class="back mono" href={backHref}><span class="arrow-chip" aria-hidden="true">←︎</span> {backLabel}</a>
+			<a class="back mono" href={backHref}><ArrowChip dir="left" /> {backLabel}</a>
 			<h1 class="h-lg">{title}</h1>
 			{#if show.kind === 'event'}
 				{#if eventDate}
@@ -402,7 +403,7 @@
 						{/if}
 					</header>
 					<div class="replay">
-						<a class="view-show mono" href={`/shows/${show.id}/${b.id}`}>View <span class="arrow-chip" aria-hidden="true">→︎</span></a>
+						<a class="view-show mono" href={`/shows/${show.id}/${b.id}`}>View <ArrowChip dir="right" /></a>
 					</div>
 				</li>
 			{/each}
@@ -497,7 +498,7 @@
 										{/if}
 									</button>
 								{/if}
-								<a class="view-show mono" href={`/shows/${show.id}/${b.id}`}>View <span class="arrow-chip" aria-hidden="true">→︎</span></a>
+								<a class="view-show mono" href={`/shows/${show.id}/${b.id}`}>View <ArrowChip dir="right" /></a>
 							</div>
 						</div>
 					</li>

@@ -3,6 +3,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { invalidateAll, replaceState } from '$app/navigation';
 	import ShowActions from '$lib/components/ShowActions.svelte';
+	import ArrowChip from '$lib/components/ArrowChip.svelte';
 	import {
 		clearPlayQueue,
 		playback,
@@ -708,7 +709,7 @@
 
 <div class="page">
 	<div class="page-head">
-		<a class="back mono" href={`/shows/${show.id}`}><span class="arrow-chip" aria-hidden="true">←︎</span> {show.title}</a>
+		<a class="back mono" href={`/shows/${show.id}`}><ArrowChip dir="left" /> {show.title}</a>
 		{#if data.canEdit}
 			<a class="btn-outline" href={`/shows/${show.id}/${broadcast.id}/edit`}>Edit</a>
 		{/if}
@@ -918,7 +919,7 @@
 							<span class="track-err" title={trackError[t.id]}>{trackError[t.id]}</span>
 						{/if}
 						<a class="url-fallback" href={t.url} target="_blank" rel="noopener noreferrer">
-							Bandcamp <span class="arrow-chip" aria-hidden="true">↗︎</span>
+							Bandcamp <ArrowChip dir="up-right" />
 						</a>
 					</li>
 				{:else}
@@ -943,7 +944,7 @@
 						{#if t.url}
 							<a class="url-fallback" href={t.url} target="_blank" rel="noopener noreferrer" title={t.url}>
 								<span class="url-host">{hostOf(t.url)}</span>
-								<span class="arrow-chip" aria-hidden="true">↗︎</span>
+								<ArrowChip dir="up-right" />
 							</a>
 						{/if}
 					</li>
