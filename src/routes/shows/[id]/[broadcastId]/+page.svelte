@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount, onDestroy } from 'svelte';
-	import { invalidateAll, replaceState } from '$app/navigation';
+	import { invalidateAll, replaceState, goto } from '$app/navigation';
 	import ShowActions from '$lib/components/ShowActions.svelte';
 	import ArrowChip from '$lib/components/ArrowChip.svelte';
 	import {
@@ -39,6 +39,51 @@
 	const artFallback = $derived([show.image, show.dj_image]);
 
 	const artUrl = $derived(episodeArtOrDefault(broadcast.id, broadcast, show));
+
+	/* ---- Episode admin actions: cancel/restore, delete (editors only) ---- */
+
+	let episodeBusy = $state(false);
+	let episodeError = $state('');
+
+	async function toggleEpisodeCancelled() {
+		episodeBusy = true;
+		episodeError = '';
+		const res = await fetch(`/api/admin/broadcasts/${broadcast.id}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ action: broadcast.cancelled ? 'restore' : 'cancel' })
+		}).catch(() => null);
+		episodeBusy = false;
+		if (!res?.ok) {
+			episodeError =
+				res?.status === 403
+					? "You don't have permission to change this episode."
+					: "Couldn't update this episode.";
+			return;
+		}
+		await invalidateAll();
+	}
+
+	async function deleteEpisode() {
+		const ok = confirm(
+			`Delete the ${fmtDate(broadcast.date)} episode for good?\n\nIts tracklist, bookmarks, favourites and saved cues are removed. This cannot be undone.`
+		);
+		if (!ok) return;
+		episodeBusy = true;
+		episodeError = '';
+		const res = await fetch(`/api/admin/broadcasts/${broadcast.id}`, {
+			method: 'DELETE'
+		}).catch(() => null);
+		episodeBusy = false;
+		if (!res?.ok) {
+			episodeError =
+				res?.status === 403
+					? "You don't have permission to delete this episode."
+					: "Couldn't delete this episode.";
+			return;
+		}
+		await goto(`/shows/${show.id}`);
+	}
 
 	/** Cue markers only do something when there's a recording to jump into. */
 	const replayPlayable = $derived(
@@ -711,9 +756,20 @@
 	<div class="page-head">
 		<a class="back mono" href={`/shows/${show.id}`}><ArrowChip dir="left" /> {show.title}</a>
 		{#if data.canEdit}
-			<a class="btn-outline" href={`/shows/${show.id}/${broadcast.id}/edit`}>Edit</a>
+			<div class="head-actions">
+				<a class="btn-outline" href={`/shows/${show.id}/${broadcast.id}/edit`}>Edit</a>
+				<button class="btn-outline" disabled={episodeBusy} onclick={toggleEpisodeCancelled}>
+					{broadcast.cancelled ? 'Restore' : 'Cancel'}
+				</button>
+				<button class="btn-outline danger" disabled={episodeBusy} onclick={deleteEpisode}>
+					Delete
+				</button>
+			</div>
 		{/if}
 	</div>
+	{#if episodeError}
+		<p class="episode-error mono">{episodeError}</p>
+	{/if}
 
 	<h1 class="h-lg">{broadcast.title ?? show.title}</h1>
 	<p class="meta mono">
@@ -1050,6 +1106,37 @@
 		align-items: center;
 		gap: 1rem;
 		margin-bottom: 1rem;
+	}
+
+	.head-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	/* Delete is destructive: red outline rather than the plain white one. */
+	.head-actions :global(.btn-outline.danger) {
+		border-color: var(--vr-red);
+		color: var(--vr-red);
+	}
+
+	.head-actions :global(.btn-outline.danger:hover) {
+		background: var(--vr-red);
+		color: var(--vr-black);
+	}
+
+	.head-actions :global(.btn-outline:disabled) {
+		opacity: 0.5;
+		cursor: default;
+		pointer-events: none;
+	}
+
+	.episode-error {
+		margin: -0.25rem 0 1rem;
+		color: var(--vr-red);
+		font-size: 0.8rem;
 	}
 
 	.back {
@@ -1534,6 +1621,15 @@
 		/* Right-align both lines of the actions column on phones. */
 		.replay > .replay-actions {
 			align-items: flex-end;
+		}
+
+		/* Editor buttons wrap under the back link instead of overflowing. */
+		.page-head {
+			flex-wrap: wrap;
+		}
+
+		.head-actions {
+			justify-content: flex-start;
 		}
 
 		.replay > .replay-btn,

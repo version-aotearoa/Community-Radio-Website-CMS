@@ -12,32 +12,12 @@
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
-	import type { BroadcastRow } from '$lib/server/shows';
 
 	let { data } = $props();
 
 	const show = $derived(data.show);
 	const upcoming = $derived(data.upcoming);
 	const past = $derived(data.past);
-
-	/** Editors (admin or the owning DJ): cancel/restore an episode, or delete it. */
-	async function toggleEpisodeCancelled(b: BroadcastRow) {
-		await fetch(`/api/admin/broadcasts/${b.id}`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ action: b.cancelled ? 'restore' : 'cancel' })
-		}).catch(() => null);
-		await invalidateAll();
-	}
-
-	async function deleteEpisode(b: BroadcastRow) {
-		const ok = confirm(
-			`Delete the ${fmtDate(b.date)} episode for good?\n\nIts tracklist, bookmarks, favourites and saved cues are removed. This cannot be undone.`
-		);
-		if (!ok) return;
-		await fetch(`/api/admin/broadcasts/${b.id}`, { method: 'DELETE' }).catch(() => null);
-		await invalidateAll();
-	}
 
 	// Replay availability is probed after paint (never during render).
 	onMount(() => {
@@ -374,32 +354,8 @@
 									{fmtTime(b.start_minutes)}–{fmtTime(b.start_minutes + b.duration_minutes)}
 								</span>
 							{/if}
-						{#if data.canEdit}
-							<a
-								class="edit-mini"
-								href={`/shows/${show.id}/${b.id}/edit`}
-								aria-label="Edit tracklist"
-								title="Edit tracklist"
-							>
-								<svg viewBox="0 0 24 24" aria-hidden="true">
-									<path
-										d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="1.8"
-										stroke-linejoin="round"
-									/>
-								</svg>
-							</a>
-						{/if}
 						{#if b.cancelled}
 							<span class="tag-cancelled mono">Cancelled</span>
-						{/if}
-						{#if data.canEdit}
-							<button class="mini-action" onclick={() => toggleEpisodeCancelled(b)}>
-								{b.cancelled ? 'Restore' : 'Cancel'}
-							</button>
-							<button class="mini-action danger" onclick={() => deleteEpisode(b)}>Delete</button>
 						{/if}
 					</header>
 					<div class="replay">
@@ -450,34 +406,8 @@
 								{:else}
 									<strong>{fmtCardDate(b.date)}</strong>
 								{/if}
-								{#if data.canEdit}
-									<a
-										class="edit-mini"
-										href={`/shows/${show.id}/${b.id}/edit`}
-										aria-label="Edit tracklist"
-										title="Edit tracklist"
-									>
-										<svg viewBox="0 0 24 24" aria-hidden="true">
-											<path
-												d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="1.8"
-												stroke-linejoin="round"
-											/>
-										</svg>
-									</a>
-								{/if}
 								{#if b.cancelled}
 									<span class="tag-cancelled mono">Cancelled</span>
-								{/if}
-								{#if data.canEdit}
-									<button class="mini-action" onclick={() => toggleEpisodeCancelled(b)}>
-										{b.cancelled ? 'Restore' : 'Cancel'}
-									</button>
-									<button class="mini-action danger" onclick={() => deleteEpisode(b)}>
-										Delete
-									</button>
 								{/if}
 							</header>
 							<div class="replay">
@@ -733,29 +663,6 @@
 		color: var(--vr-muted);
 	}
 
-	.edit-mini {
-		margin-left: auto;
-		color: var(--vr-muted);
-		border: 1px solid var(--vr-line-muted);
-		padding: 0.3rem 0.5rem;
-		text-decoration: none;
-		white-space: nowrap;
-		display: inline-grid;
-		place-items: center;
-	}
-
-	.edit-mini svg {
-		width: 12px;
-		height: 12px;
-		display: block;
-	}
-
-	.edit-mini:hover {
-		background: var(--vr-text);
-		color: var(--vr-black);
-		border-color: var(--vr-line);
-	}
-
 	.break-banner {
 		margin: 0.5rem 0 0;
 		padding: 0.4rem 0.7rem;
@@ -774,29 +681,6 @@
 		border: 1px dashed var(--vr-line-muted);
 		padding: 0.15rem 0.4rem;
 		white-space: nowrap;
-	}
-
-	.mini-action {
-		background: transparent;
-		border: 1px solid var(--vr-line-muted);
-		color: var(--vr-muted);
-		font-family: var(--vr-font-mono);
-		font-size: 0.68rem;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		padding: 0.25rem 0.45rem;
-		cursor: pointer;
-		white-space: nowrap;
-	}
-
-	.mini-action:hover {
-		color: var(--vr-text);
-		border-color: var(--vr-line);
-	}
-
-	.mini-action.danger:hover {
-		color: var(--vr-red);
-		border-color: var(--vr-red);
 	}
 
 	.hint {
@@ -858,6 +742,13 @@
 	@media (max-width: 640px) {
 		.broadcast.past {
 			gap: 0.75rem;
+		}
+
+		/* Title and date/time each get their own row on phones. */
+		.broadcast header {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.15rem;
 		}
 	}
 
