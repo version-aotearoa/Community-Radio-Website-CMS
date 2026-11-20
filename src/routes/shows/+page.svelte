@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import Seo from '$lib/components/Seo.svelte';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
 
@@ -36,6 +36,52 @@
 	});
 
 	const allShows = $derived([...data.shows]);
+
+	// ---- Episodes view (?view=episodes) ----
+	const isEpisodes = $derived(data.view === 'episodes');
+	let episodeShow = $state('all');
+	let episodeYear = $state('all');
+
+	const episodes = $derived(data.episodes ?? []);
+
+	const episodeShows = $derived(
+		[...new Map(episodes.map((e) => [e.show_id, e.show_title])).entries()]
+			.map(([id, title]) => ({ id, title }))
+			.sort((a, b) => a.title.localeCompare(b.title))
+	);
+
+	const episodeYears = $derived(
+		[...new Set(episodes.map((e) => e.date.slice(0, 4)))].sort().reverse()
+	);
+
+	const visibleEpisodes = $derived(
+		episodes.filter(
+			(e) =>
+				(episodeShow === 'all' || e.show_id === episodeShow) &&
+				(episodeYear === 'all' || e.date.startsWith(episodeYear))
+		)
+	);
+
+	function setView(next: 'shows' | 'episodes') {
+		if ((next === 'episodes') === isEpisodes) return;
+		void goto(next === 'episodes' ? '/shows?view=episodes' : '/shows', {
+			keepFocus: true,
+			noScroll: true
+		});
+	}
+
+	/** Compact list date: YYYY-MM-DD → DD-MM-YY. */
+	function fmtCardDate(dateStr: string) {
+		const [y, m, d] = dateStr.split('-');
+		return `${d}-${m}-${y.slice(2)}`;
+	}
+
+	function fmtDuration(mins: number) {
+		const h = Math.floor(mins / 60);
+		const m = mins % 60;
+		if (h === 0) return `${m} min`;
+		return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
+	}
 
 	const filtered = $derived(
 		filter === 'all'
@@ -122,6 +168,63 @@
 		<p class="subtitle mono">Browse the Version Radio lineup — each show has its own page and tracklists.</p>
 	</header>
 
+	<div class="view-bar">
+		<div class="filter-btns" role="group" aria-label="View">
+			<button class="filter-btn" class:active={!isEpisodes} onclick={() => setView('shows')}>
+				Shows
+			</button>
+			<button class="filter-btn" class:active={isEpisodes} onclick={() => setView('episodes')}>
+				Episodes
+			</button>
+		</div>
+	</div>
+
+	{#if isEpisodes}
+		<div class="toolbar">
+			<div class="filter-stack">
+				<div class="sort-control">
+					<label class="sort-label mono" for="episode-show">Show</label>
+					<select id="episode-show" class="sort-select" bind:value={episodeShow}>
+						<option value="all">All shows</option>
+						{#each episodeShows as s (s.id)}
+							<option value={s.id}>{s.title}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="sort-control">
+					<label class="sort-label mono" for="episode-year">Year</label>
+					<select id="episode-year" class="sort-select" bind:value={episodeYear}>
+						<option value="all">All years</option>
+						{#each episodeYears as y (y)}
+							<option value={y}>{y}</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+			<span class="empty mono">
+				{visibleEpisodes.length} episode{visibleEpisodes.length === 1 ? '' : 's'}
+			</span>
+		</div>
+
+		{#if visibleEpisodes.length === 0}
+			<p class="empty mono">No episodes yet.</p>
+		{:else}
+			<ul class="episode-list">
+				{#each visibleEpisodes as e (e.id)}
+					<li>
+						<a class="episode-row" href={`/shows/${e.show_id}/${e.id}`}>
+							<span class="ep-date mono">{fmtCardDate(e.date)}</span>
+							<span class="ep-show mono">{e.show_title}</span>
+							<span class="ep-title">{e.episode_title ?? e.show_title}</span>
+							<span class="ep-meta mono">
+								{#if e.replay_url}▶ Replay · {/if}{fmtDuration(e.duration_minutes)}
+							</span>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{:else}
 	<div class="toolbar">
 		<div class="filter-stack">
 			<div class="filter-btns" role="group" aria-label="Filter shows">
@@ -217,6 +320,7 @@
 		{#if filter !== 'events'}
 			<p class="cycle-foot mono"><span aria-hidden="true">*</span> of 4 week cycle</p>
 		{/if}
+	{/if}
 	{/if}
 </div>
 
@@ -436,6 +540,61 @@
 		font-size: 0.8rem;
 	}
 
+	.view-bar {
+		margin: 0 0 1rem;
+	}
+
+	.episode-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		border-top: 1px solid var(--vr-line);
+	}
+
+	.episode-list li {
+		border-bottom: 1px solid var(--vr-line-muted);
+	}
+
+	.episode-row {
+		display: grid;
+		grid-template-columns: 6.5rem 15rem minmax(0, 1fr) auto;
+		gap: 1rem;
+		align-items: baseline;
+		padding: 0.85rem 0.5rem;
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.episode-row:hover {
+		background: var(--vr-surface-low);
+	}
+
+	.ep-date {
+		color: var(--vr-muted);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.ep-show {
+		color: var(--vr-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.ep-title {
+		font-weight: 600;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.ep-meta {
+		color: var(--vr-muted);
+		white-space: nowrap;
+		text-align: right;
+	}
+
 	.cycle-foot span {
 		color: var(--vr-green);
 	}
@@ -473,6 +632,33 @@
 	@media (max-width: 640px) {
 		.grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.episode-row {
+			grid-template-columns: 1fr auto;
+			grid-template-areas:
+				'date meta'
+				'title title'
+				'show show';
+			column-gap: 0.5rem;
+			row-gap: 0.15rem;
+		}
+
+		.ep-date {
+			grid-area: date;
+		}
+
+		.ep-meta {
+			grid-area: meta;
+		}
+
+		.ep-title {
+			grid-area: title;
+			white-space: normal;
+		}
+
+		.ep-show {
+			grid-area: show;
 		}
 
 		/* Fill the cell so a card with a two-line title doesn't end above its
