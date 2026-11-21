@@ -187,26 +187,6 @@
 		const current = $playback;
 		return current.kind === 'media' && current.url === url && $streamPlaying;
 	}
-
-	/** Keep each archive row's art a square matching its content column height. */
-	function squareToBody(node: HTMLElement) {
-		const art = node.querySelector<HTMLElement>('.past-art');
-		const body = node.querySelector<HTMLElement>('.past-body');
-		if (!art || !body) return;
-		const sync = () => {
-			const h = body.offsetHeight;
-			art.style.width = `${h}px`;
-			art.style.height = `${h}px`;
-		};
-		const ro = new ResizeObserver(sync);
-		ro.observe(body);
-		sync();
-		return {
-			destroy() {
-				ro.disconnect();
-			}
-		};
-	}
 </script>
 
 <svelte:head>
@@ -374,7 +354,7 @@
 				{#each past as b, i (b.id)}
 					{@const epArt = episodeArtOrDefault(b.id, b, show)}
 					{@const epArtFb = [show.image, show.dj_image]}
-					<li class="broadcast past" use:squareToBody>
+					<li class="broadcast past">
 						<a
 							class="past-art"
 							href={`/shows/${show.id}/${b.id}`}
@@ -723,10 +703,14 @@
 		overflow: hidden;
 	}
 
+	/* Fixed square art. Sizing it from the body height created a feedback loop
+	   (art wider → body narrower → text taller → art taller), which could grow
+	   the image until it swallowed the card when the window was resized. */
 	.broadcast.past .past-art {
 		flex: 0 0 auto;
-		width: 96px;
-		height: 96px;
+		width: 8rem;
+		height: 8rem;
+		align-self: center;
 		display: block;
 		background: var(--vr-surface-highest);
 	}
