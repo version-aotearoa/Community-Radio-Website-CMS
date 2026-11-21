@@ -402,13 +402,11 @@
 							<header>
 								{#if b.title}
 									<strong>{b.title}</strong>
-									<span class="mono">{fmtCardDate(b.date)}</span>
-								{:else}
-									<strong>{fmtCardDate(b.date)}</strong>
 								{/if}
 								{#if b.cancelled}
 									<span class="tag-cancelled mono">Cancelled</span>
 								{/if}
+								<span class="mono">{fmtCardDate(b.date)}</span>
 							</header>
 							<div class="replay">
 								{#if b.replay_url && $unavailableReplays.has(b.replay_url)}
@@ -637,6 +635,14 @@
 		}
 	}
 
+	/* Wide desktop: episode cards go three-up. The title/date row stays on one
+	   line so the date keeps its top-right corner (see header rules below). */
+	@media (min-width: 1000px) {
+		.past-list {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
 	.broadcast.today {
 		border-color: var(--vr-line);
 		background: var(--vr-surface-high);
@@ -652,6 +658,17 @@
 	.broadcast header strong {
 		font-family: var(--vr-font-body);
 		font-weight: 600;
+		/* Long titles wrap inside their own column instead of pushing the date
+		   off its top-right corner. */
+		min-width: 0;
+	}
+
+	/* The date/time keeps a single line at the card's top-right, even when the
+	   episode has no title and it is the header's only item. */
+	.broadcast header > span:not(.tag-cancelled) {
+		flex-shrink: 0;
+		white-space: nowrap;
+		margin-left: auto;
 	}
 
 	.broadcast header span {
@@ -740,15 +757,39 @@
 	}
 
 	@media (max-width: 640px) {
+		/* Equal card heights on phones: the square art is sized from the body,
+		   so a shared min-height keeps every thumbnail the same size whether or
+		   not the episode has a title. */
 		.broadcast.past {
+			min-height: 8.125rem;
 			gap: 0.75rem;
 		}
 
-		/* Title and date/time each get their own row on phones. */
+		/* Phones: the date sits on the first row, top-left, above the title
+		   (the same order the Episodes list uses). The Cancelled tag stays
+		   below the title. */
 		.broadcast header {
 			flex-direction: column;
 			align-items: flex-start;
 			gap: 0.15rem;
+		}
+
+		.broadcast.past header > span:not(.tag-cancelled) {
+			order: -1;
+		}
+
+		/* Stacked cards are left-aligned, including the upcoming card's time. */
+		.broadcast header > span:not(.tag-cancelled) {
+			margin-left: 0;
+		}
+
+		/* A very long title can't grow the card beyond its neighbours. */
+		.broadcast.past header strong {
+			display: -webkit-box;
+			-webkit-line-clamp: 2;
+			line-clamp: 2;
+			-webkit-box-orient: vertical;
+			overflow: hidden;
 		}
 	}
 
