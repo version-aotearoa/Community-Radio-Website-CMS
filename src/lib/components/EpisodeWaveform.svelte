@@ -474,7 +474,7 @@
 		border: 1px solid var(--vr-line-muted);
 		background: var(--vr-surface-low);
 		padding: 0.55rem 0.7rem 0.45rem;
-		margin: 0 0 1rem;
+		margin: 1rem 0;
 	}
 
 	.waveform-shell.disabled {

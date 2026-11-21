@@ -791,6 +791,17 @@
 			-webkit-box-orient: vertical;
 			overflow: hidden;
 		}
+
+		/* Top-align the card body: with a shared min-height, centring pushed
+		   untitled cards' dates further down than titled ones. */
+		.broadcast.past .past-body {
+			justify-content: flex-start;
+		}
+
+		/* Date/title stay at the top; Replay/View stay pinned to the bottom. */
+		.broadcast.past .past-body .replay {
+			margin-top: auto;
+		}
 	}
 
 	.replay-btn {
