@@ -622,8 +622,22 @@
 		margin: 0;
 		padding: 0;
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+		/* Stepped, not auto-fill: a ~1000px window gets three cards rather than
+		   two oversized ones, and wide desktop stops at four. */
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		border: 1px solid var(--vr-line);
+	}
+
+	@media (min-width: 1000px) {
+		.grid {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
+	@media (min-width: 1300px) {
+		.grid {
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+		}
 	}
 
 	.card {
@@ -981,6 +995,14 @@
 			flex: 1 1 100%;
 			max-width: none;
 			min-width: 0;
+		}
+
+		/* A field under 16px makes phones auto-zoom on focus. Pin the search
+		   field to 1rem so tapping it never magnifies the page, and ease the
+		   mono tracking so the uppercase text still fits. */
+		.search-input {
+			font-size: 1rem;
+			letter-spacing: 0.02em;
 		}
 
 		/* Fill the cell so a card with a two-line title doesn't end above its
