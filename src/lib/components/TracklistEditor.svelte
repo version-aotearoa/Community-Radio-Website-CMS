@@ -105,6 +105,27 @@
 	let detectStatus = $state<string | null>(null);
 	let detectProgress = $state<number | null>(null);
 	let detectTimer: ReturnType<typeof setTimeout> | null = null;
+	let detectCredits = $state<{
+		credits: number;
+		usedToday: number;
+		dailyCap: number;
+		purchaseUrl: string | null;
+	} | null>(null);
+	let detectCreditsError = $state('');
+
+	// Show the Track Detect balance before an admin spends a credit (free call).
+	$effect(() => {
+		if (isAdmin) void loadDetectCredits();
+	});
+
+	const detectCreditsLabel = $derived.by(() => {
+		if (!detectCredits) return '';
+		const n = detectCredits.credits;
+		const base = `${n} credit${n === 1 ? '' : 's'} left`;
+		return detectCredits.dailyCap > 0
+			? `${base} · ${detectCredits.usedToday}/${detectCredits.dailyCap} today`
+			: base;
+	});
 
 	// Follow the episode's saved Serato playlist URL and intro offset when fresh
 	// data arrives.
@@ -663,6 +684,38 @@
 		bandcampBusy = false;
 	}
 
+	/** Refresh the Track Detect credit balance (free account call). */
+	async function loadDetectCredits() {
+		if (!isAdmin) return;
+		detectCreditsError = '';
+		try {
+			const res = await fetch('/api/admin/track-detect/account');
+			const body = (await res.json().catch(() => ({}))) as {
+				configured?: boolean;
+				credits?: number;
+				limits?: { dailyCap?: number; usedToday?: number };
+				purchaseUrl?: string | null;
+				error?: string;
+			};
+			if (!res.ok) {
+				detectCreditsError = body.error ?? 'Could not read Track Detect credits.';
+				return;
+			}
+			if (body.configured === false || typeof body.credits !== 'number') {
+				detectCredits = null;
+				return;
+			}
+			detectCredits = {
+				credits: body.credits,
+				usedToday: body.limits?.usedToday ?? 0,
+				dailyCap: body.limits?.dailyCap ?? 0,
+				purchaseUrl: body.purchaseUrl ?? null
+			};
+		} catch {
+			detectCreditsError = 'Could not read Track Detect credits.';
+		}
+	}
+
 	/**
 	 * Track Detect: start (or reuse) a detection for this episode and import the
 	 * results. Admin-only while trialling. POST never spends a second credit for a
@@ -690,6 +743,11 @@
 				return;
 			}
 
+			// The POST reports the pre-submit balance; a new run spends one credit.
+			if (!body.reused && typeof body.credits === 'number' && detectCredits) {
+				detectCredits = { ...detectCredits, credits: Math.max(0, body.credits - 1) };
+			}
+
 			detectStatus = body.status ?? 'queued';
 			detectNotice =
 				body.reused && body.status === 'done'
@@ -701,6 +759,7 @@
 			detectError = 'Could not reach Track Detect.';
 		} finally {
 			detectBusy = false;
+			void loadDetectCredits();
 		}
 	}
 
@@ -1447,8 +1506,24 @@
 					Detect again (1 credit)
 				</Button>
 			{/if}
+			{#if detectCredits}
+				<span class="credit-balance" class:low={detectCredits.credits <= 3}>
+					{detectCreditsLabel}
+				</span>
+				{#if detectCredits.credits <= 3 && detectCredits.purchaseUrl}
+					<a
+						class="credit-buy"
+						href={detectCredits.purchaseUrl}
+						target="_blank"
+						rel="noopener noreferrer">Buy credits</a
+					>
+				{/if}
+			{/if}
 			<span class="hint">Beta · fingerprints the replay via Track Detect. One credit per new run.</span>
 		</div>
+		{#if detectCreditsError}
+			<p class="replay-msg bad">{detectCreditsError}</p>
+		{/if}
 		{#if detectError}
 			<p class="replay-msg bad">{detectError}</p>
 		{/if}
@@ -1632,6 +1707,27 @@
 	.serato-row input.serato-offset {
 		flex: 0 0 5.5rem;
 		width: 5.5rem;
+	}
+
+	.credit-balance {
+		font-family: var(--vr-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.04em;
+		color: var(--vr-muted);
+		white-space: nowrap;
+	}
+
+	.credit-balance.low {
+		color: var(--vr-text);
+	}
+
+	.credit-buy {
+		font-family: var(--vr-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.04em;
+		color: var(--vr-text);
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 
 	/* Replay preview: play/pause, ±5s / ±1 min, scrub — so cues can be stamped
