@@ -32,20 +32,17 @@ export interface FeaturedShow {
 export const load: PageServerLoad = async ({ platform, locals, cookies }) => {
 	const db = platform!.env.DB;
 
-	// Latest shows: admin-curated episodes (broadcast.home_ready = 1, toggled
-	// in Studio → Featured). No date bound, so a just-finished episode appears
-	// once the admin marks it ready.
+	// Latest shows: admin-curated episodes (broadcast.home_ready = 1, toggled in
+	// Studio → Featured). The toggle is the only curation: the three newest
+	// toggled episodes win, even when they come from the same show. No date
+	// bound, so a just-finished episode appears once the admin marks it ready.
 	const { results } = await db
 		.prepare(
 			`SELECT b.id AS broadcast_id, b.show_id, b.date, b.start_minutes, b.replay_url, b.art, s.title, s.image AS show_image, s.kind, s.event_type, COALESCE(NULLIF(s.dj_handle, ''), u.name) AS dj_name
 			 FROM broadcast b
 			 JOIN show s ON s.id = b.show_id
 			 LEFT JOIN user u ON u.id = s.dj_id
-			 WHERE s.active = 1 AND b.home_ready = 1 AND b.cancelled = 0 AND b.id = (
-				SELECT b2.id FROM broadcast b2
-				WHERE b2.show_id = b.show_id AND b2.home_ready = 1 AND b2.cancelled = 0
-				ORDER BY b2.date DESC, b2.start_minutes DESC LIMIT 1
-			 )
+			 WHERE s.active = 1 AND b.home_ready = 1 AND b.cancelled = 0
 			 ORDER BY b.date DESC, b.start_minutes DESC
 			 LIMIT 3`
 		)
