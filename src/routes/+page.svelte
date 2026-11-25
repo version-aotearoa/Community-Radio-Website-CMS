@@ -103,19 +103,29 @@
 			<h1 class="hero-title">{heroTitle}</h1>
 			<p class="hero-meta mono">Version Radio · Aotearoa</p>
 		</div>
-		<button class="btn-block hero-play" onclick={() => requestSetPlaying(!isPlaying)}>
-			{#if isPlaying}
-				<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-					<path d="M7 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0zM15 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0z" fill="currentColor" />
-				</svg>
-				<span>Pause</span>
-			{:else}
-				<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-					<path d="M8 5.4v13.2a1 1 0 0 0 1.53.85l10.6-6.6a1 1 0 0 0 0-1.7L9.53 4.55A1 1 0 0 0 8 5.4z" fill="currentColor" />
-				</svg>
-				<span>Play</span>
+		<div class="hero-actions">
+			<button class="btn-block hero-play" onclick={() => requestSetPlaying(!isPlaying)}>
+				{#if isPlaying}
+					<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+						<path d="M7 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0zM15 5.2a1 1 0 0 1 2 0v13.6a1 1 0 0 1-2 0z" fill="currentColor" />
+					</svg>
+					<span>Pause</span>
+				{:else}
+					<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+						<path d="M8 5.4v13.2a1 1 0 0 0 1.53.85l10.6-6.6a1 1 0 0 0 0-1.7L9.53 4.55A1 1 0 0 0 8 5.4z" fill="currentColor" />
+					</svg>
+					<span>Play</span>
+				{/if}
+			</button>
+			{#if isLiveNow}
+				<a class="btn-block hero-chat" href="/chat" aria-label="Open the live chat">
+					<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+						<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" fill="currentColor" />
+					</svg>
+					<span>Chat</span>
+				</a>
 			{/if}
-		</button>
+		</div>
 	</div>
 </section>
 
@@ -377,8 +387,24 @@
 		color: var(--vr-muted);
 	}
 
-	.hero-play {
+	.hero-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
 		align-self: flex-start;
+	}
+
+	/* Chat rides alongside Play while a DJ is streaming, as an outline action so
+	   Play stays the primary button. */
+	.hero-chat {
+		background: transparent;
+		color: #fff;
+		border-color: #fff;
+	}
+
+	.hero-chat:hover {
+		background: #fff;
+		color: #000;
 	}
 
 	@media (min-width: 900px) {
@@ -389,7 +415,7 @@
 			padding: 3rem var(--vr-pad);
 		}
 
-		.hero-play {
+		.hero-actions {
 			align-self: flex-end;
 		}
 	}
