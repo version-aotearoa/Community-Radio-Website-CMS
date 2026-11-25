@@ -2,7 +2,14 @@ import { error } from '@sveltejs/kit';
 import { episodeRoomKey } from '$lib/chat';
 import { fetchChatHistory } from '$lib/server/chatHistory';
 import { getReplayDuration } from '$lib/server/replayDuration';
-import { getShowWithDj, getTracklist, resolveBroadcastForShow } from '$lib/server/shows';
+import {
+	broadcastEnded,
+	getBroadcasts,
+	getShowWithDj,
+	getTracklist,
+	resolveBroadcastForShow,
+	zonedNow
+} from '$lib/server/shows';
 import { getSavedCueSeconds } from '$lib/server/cues';
 import type { PageServerLoad } from './$types';
 
@@ -13,6 +20,15 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	const broadcast = await resolveBroadcastForShow(db, show.id, params.broadcastId);
 	if (!broadcast) error(404, 'Broadcast not found');
 	const tracks = await getTracklist(db, broadcast.id);
+
+	// "More episodes": this show's own archive, newest first. Same rule as the
+	// show page's Past broadcasts list (ended, not cancelled), so the two never
+	// disagree; the current episode can't recommend itself.
+	const ownEpisodes = await getBroadcasts(db, show.id);
+	const recent = ownEpisodes
+		.filter((b) => b.id !== broadcast.id && b.cancelled === 0 && broadcastEnded(zonedNow(), b))
+		.reverse()
+		.slice(0, 4);
 
 	const user = locals.user ?? null;
 	const savedCues = user ? await getSavedCueSeconds(db, user.id, broadcast.id) : [];
@@ -56,6 +72,8 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 		show,
 		broadcast,
 		tracks,
+		/** Up to four other ended episodes of this show, newest first. */
+		recent,
 		savedCues,
 		followed,
 		savedEpisode,
