@@ -41,6 +41,8 @@ export interface TrackDetectJob {
 export interface TrackDetectAccount {
 	credits: number;
 	limits: { dailyCap: number; usedToday: number; maxConcurrent: number; maxActive: number };
+	/** Stripe checkout link for topping up; present on the live API. */
+	purchaseUrl?: string;
 }
 
 export type TrackDetectResult<T> =
