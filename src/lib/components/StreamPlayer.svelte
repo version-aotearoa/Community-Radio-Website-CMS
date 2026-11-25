@@ -23,13 +23,21 @@
 	import { liveArtOf } from '$lib/api/live';
 	import { formatTrackTime } from '$lib/trackTime';
 	import { AZURACAST_BASE, AZURACAST_STATION_SHORTCODE, proxiedMediaUrl } from '$lib/azuracast';
+	import { isIos } from '$lib/pwa';
 	import SeekControl from '$lib/components/SeekControl.svelte';
 
 	/** Native HLS (Safari/iOS) talks to AzuraCast directly — the Worker proxy
 	 *  stalls native HLS segments and breaks lock-screen playback. */
 	const STREAM_URL = `${AZURACAST_BASE}/hls/${AZURACAST_STATION_SHORTCODE}/live.m3u8`;
+	/** iOS/iPadOS gets a bitrate-capped master (lofi/midfi only): the full hifi
+	 *  variant cannot be sustained on the direct NZ → Amsterdam path. */
+	const MOBILE_STREAM_URL = '/api/live-native.m3u8';
 	/** hls.js goes through the same-origin Worker: much faster from NZ. */
 	const PROXY_STREAM_URL = `/api/stream/hls/${AZURACAST_STATION_SHORTCODE}/live.m3u8`;
+
+	function nativeStreamUrl(): string {
+		return isIos() ? MOBILE_STREAM_URL : STREAM_URL;
+	}
 
 	let audioEl: HTMLAudioElement | undefined = $state();
 	let hls: import('hls.js').default | null = null;
@@ -438,7 +446,7 @@
 				}
 			} else if (!nativeHls && audioEl.canPlayType('application/vnd.apple.mpegurl')) {
 				nativeHls = true;
-				audioEl.src = STREAM_URL;
+				audioEl.src = nativeStreamUrl();
 			}
 			return;
 		}
@@ -454,7 +462,7 @@
 		} else if (audioEl.canPlayType('application/vnd.apple.mpegurl')) {
 			// Native HLS (Safari): no per-variant control.
 			nativeHls = true;
-			audioEl.src = STREAM_URL;
+			audioEl.src = nativeStreamUrl();
 		}
 	}
 

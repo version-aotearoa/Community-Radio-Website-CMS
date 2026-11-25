@@ -36,7 +36,9 @@ export function dismissBanner() {
 
 export function isIos(): boolean {
 	if (typeof navigator === 'undefined') return false;
-	return /iphone|ipad|ipod/i.test(navigator.userAgent);
+	if (/iphone|ipad|ipod/i.test(navigator.userAgent)) return true;
+	// iPadOS 13+ reports a desktop Mac user agent; touch support distinguishes it.
+	return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
 }
 
 export function isStandalone(): boolean {
