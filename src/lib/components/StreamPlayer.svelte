@@ -22,10 +22,14 @@
 	import { live, startLivePolling } from '$lib/stores/live';
 	import { liveArtOf } from '$lib/api/live';
 	import { formatTrackTime } from '$lib/trackTime';
-	import { AZURACAST_BASE, AZURACAST_STATION_SHORTCODE } from '$lib/azuracast';
+	import { AZURACAST_BASE, AZURACAST_STATION_SHORTCODE, proxiedMediaUrl } from '$lib/azuracast';
 	import SeekControl from '$lib/components/SeekControl.svelte';
 
+	/** Native HLS (Safari/iOS) talks to AzuraCast directly — the Worker proxy
+	 *  stalls native HLS segments and breaks lock-screen playback. */
 	const STREAM_URL = `${AZURACAST_BASE}/hls/${AZURACAST_STATION_SHORTCODE}/live.m3u8`;
+	/** hls.js goes through the same-origin Worker: much faster from NZ. */
+	const PROXY_STREAM_URL = `/api/stream/hls/${AZURACAST_STATION_SHORTCODE}/live.m3u8`;
 
 	let audioEl: HTMLAudioElement | undefined = $state();
 	let hls: import('hls.js').default | null = null;
@@ -374,7 +378,7 @@
 			stopLive();
 			lastSeekTarget = null;
 			seekCorrections = 0;
-			audioEl.src = p.url;
+			audioEl.src = proxiedMediaUrl(p.url) ?? p.url;
 			if (restoring) {
 				// Re-opening a discarded tab (Safari): fetch metadata, land the
 				// playhead on the saved spot and stay paused. Autoplay policy would
@@ -428,7 +432,7 @@
 			if (HlsCtor.isSupported()) {
 				if (!hls) {
 					hls = new HlsCtor({ enableWorker: true, maxBufferLength: 30 });
-					hls.loadSource(STREAM_URL);
+					hls.loadSource(PROXY_STREAM_URL);
 					hls.attachMedia(audioEl);
 					wireHlsEvents(HlsCtor);
 				}
@@ -444,7 +448,7 @@
 
 		if (HlsCtor.isSupported()) {
 			hls = new HlsCtor({ enableWorker: true, maxBufferLength: 30 });
-			hls.loadSource(STREAM_URL);
+			hls.loadSource(PROXY_STREAM_URL);
 			hls.attachMedia(audioEl);
 			wireHlsEvents(HlsCtor);
 		} else if (audioEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -483,7 +487,7 @@
 		const resumeAt =
 			pendingSeek ?? (Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : currentTime);
 		pendingSeek = resumeAt > 0 ? resumeAt : null;
-		audioEl.src = media.url;
+		audioEl.src = proxiedMediaUrl(media.url) ?? media.url;
 		audioEl.load();
 		setLoading(true, 'repair:media');
 	}

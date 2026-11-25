@@ -29,6 +29,26 @@ export function replayPlayUrl(trackId: string): string {
 	return `${AZURACAST_BASE}/api/station/${AZURACAST_STATION_ID}/ondemand/download/${trackId}`;
 }
 
+/**
+ * Same-origin playback URL for AzuraCast media.
+ *
+ * The AzuraCast origin is far from the audience (Amsterdam while the station is
+ * in NZ), and the direct route can be slower than the stream's own bitrate. The
+ * /api/stream Worker reaches the origin over Cloudflare's backbone — measured
+ * several times faster — so the media element loads through it.
+ *
+ * Keep the original URL for identity/comparisons (resume state, "is this mine"
+ * checks, share links); only hand this to `<audio>` / hls.js.
+ */
+export function proxiedMediaUrl(url: string | null | undefined): string | null {
+	const value = (url ?? '').trim();
+	if (!value) return null;
+	if (value.startsWith(`${AZURACAST_BASE}/`)) {
+		return `/api/stream${value.slice(AZURACAST_BASE.length)}`;
+	}
+	return value;
+}
+
 /** Deterministic short hash (FNV-1a, 8 hex). Same on client and server. */
 export function artUrlHash(url: string): string {
 	let hash = 0x811c9dc5;
