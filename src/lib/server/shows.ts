@@ -45,6 +45,8 @@ export interface BroadcastRow {
 	cancelled: number;
 	/** Serato public playlist URL for this episode (migrations/0033). */
 	serato_url: string | null;
+	/** Intro seconds in the replay before Serato's first track (migrations/0035). */
+	serato_offset_seconds: number;
 	/** Track Detect job for this episode's recording (migrations/0032). */
 	detect_job_id: string | null;
 	detect_status: string | null;

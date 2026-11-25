@@ -43,10 +43,11 @@ export const GET: RequestHandler = async ({ params, url, locals, platform }) => 
 };
 
 /**
- * Save (or clear) the episode's Serato playlist URL.
+ * Save (or clear) the episode's Serato playlist URL and intro offset.
  *
  * Kept separate from the import so a DJ can paste the URL before the playlist is
- * published; the import then works later without retyping.
+ * published; the import then works later without retyping. The offset is the
+ * number of seconds the replay starts before Serato's first track.
  */
 export const PUT: RequestHandler = async ({ request, params, locals, platform }) => {
 	const user = locals.user;
@@ -64,16 +65,37 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 	const broadcast = await resolveBroadcastForShow(db, show.id, params.broadcastId);
 	if (!broadcast) return json({ error: 'Episode not found' }, { status: 404 });
 
-	const body = (await request.json().catch(() => ({}))) as { url?: unknown };
+	const body = (await request.json().catch(() => ({}))) as {
+		url?: unknown;
+		offsetSeconds?: unknown;
+	};
 	const raw = typeof body.url === 'string' ? body.url.trim() : '';
 	const nowSec = Math.floor(Date.now() / 1000);
 
+	// The offset is an explicit intro length, not a guess: whole seconds only.
+	const rawOffset = body.offsetSeconds;
+	if (
+		rawOffset !== undefined &&
+		(typeof rawOffset !== 'number' ||
+			!Number.isInteger(rawOffset) ||
+			rawOffset < 0 ||
+			rawOffset > 86_400)
+	) {
+		return json(
+			{ error: 'Intro offset must be whole seconds between 0 and 86400' },
+			{ status: 400 }
+		);
+	}
+	const offset = rawOffset === undefined ? (broadcast.serato_offset_seconds ?? 0) : rawOffset;
+
 	if (raw === '') {
 		await db
-			.prepare('UPDATE broadcast SET serato_url = NULL, updated_at = ? WHERE id = ?')
-			.bind(nowSec, broadcast.id)
+			.prepare(
+				'UPDATE broadcast SET serato_url = NULL, serato_offset_seconds = ?, updated_at = ? WHERE id = ?'
+			)
+			.bind(offset, nowSec, broadcast.id)
 			.run();
-		return json({ ok: true, url: null });
+		return json({ ok: true, url: null, offsetSeconds: offset });
 	}
 
 	if (!isSeratoPlaylistUrl(raw)) {
@@ -81,9 +103,11 @@ export const PUT: RequestHandler = async ({ request, params, locals, platform })
 	}
 
 	await db
-		.prepare('UPDATE broadcast SET serato_url = ?, updated_at = ? WHERE id = ?')
-		.bind(raw, nowSec, broadcast.id)
+		.prepare(
+			'UPDATE broadcast SET serato_url = ?, serato_offset_seconds = ?, updated_at = ? WHERE id = ?'
+		)
+		.bind(raw, offset, nowSec, broadcast.id)
 		.run();
 
-	return json({ ok: true, url: raw });
+	return json({ ok: true, url: raw, offsetSeconds: offset });
 };

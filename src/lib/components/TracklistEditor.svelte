@@ -7,7 +7,7 @@
 	import RichTextEditor from '$lib/components/RichTextEditor.svelte';
 	import EpisodeWaveform from '$lib/components/EpisodeWaveform.svelte';
 	import { parseTracksCsv, toTracksCsv, tracklistCsvFilename } from '$lib/csv';
-	import { formatTrackTime, parseTrackTime } from '$lib/trackTime';
+	import { formatTrackTime, parseTrackTime, MARK_MAX_SECONDS } from '$lib/trackTime';
 	import {
 		clearPlayQueue,
 		playback,
@@ -92,6 +92,7 @@
 	let seratoError = $state('');
 	let seratoNotice = $state('');
 	let seratoUrl = $state('');
+	let seratoOffset = $state<number | null>(0);
 	let seratoSaving = $state(false);
 	let bandcampBusy = $state(false);
 	let bandcampNotice = $state('');
@@ -105,10 +106,19 @@
 	let detectProgress = $state<number | null>(null);
 	let detectTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// Follow the episode's saved Serato playlist URL when fresh data arrives.
+	// Follow the episode's saved Serato playlist URL and intro offset when fresh
+	// data arrives.
 	$effect(() => {
 		seratoUrl = broadcast.serato_url ?? '';
+		seratoOffset = broadcast.serato_offset_seconds ?? 0;
 	});
+
+	/** Whole seconds of intro to add to Serato marks; 0 when unset/invalid. */
+	const seratoOffsetSeconds = $derived(
+		typeof seratoOffset === 'number' && Number.isFinite(seratoOffset)
+			? Math.max(0, Math.min(MARK_MAX_SECONDS, Math.round(seratoOffset)))
+			: 0
+	);
 
 	// Sync the replay/description/slug form fields whenever the broadcast prop
 	// changes (fresh server data after a save or navigation).
@@ -383,10 +393,15 @@
 	 * Append imported rows to the grid, skipping ones already present (matched on
 	 * time + title + artist). Used by the Serato and Track Detect imports so both
 	 * behave the same and neither disturbs existing rows.
+	 *
+	 * `preOffsetSeconds` guards the "imported before I set the intro offset" case:
+	 * an existing row whose mark matches this row *minus* the offset is reported
+	 * back (not duplicated), so the DJ can shift it instead.
 	 */
 	async function appendImportedRows(
-		rows: Array<{ markSeconds: number | null; artist: string; title: string; url?: string | null }>
-	): Promise<{ added: number; skipped: number }> {
+		rows: Array<{ markSeconds: number | null; artist: string; title: string; url?: string | null }>,
+		opts?: { preOffsetSeconds?: number }
+	): Promise<{ added: number; skipped: number; preOffset: number }> {
 		const existing = new Set(
 			(gridApi?.getState().data ?? []).map((r: any) =>
 				rowKey(String(r.mark ?? ''), String(r.title ?? ''), String(r.artist ?? ''))
@@ -395,11 +410,20 @@
 
 		let position = (gridApi?.getState().data ?? []).length;
 		let added = 0;
+		let preOffset = 0;
 
 		for (const row of rows) {
 			const mark = formatTrackTime(row.markSeconds ?? null);
 			const key = rowKey(mark, row.title, row.artist);
 			if (existing.has(key)) continue;
+
+			if (opts?.preOffsetSeconds && row.markSeconds !== null) {
+				const withoutOffset = formatTrackTime(row.markSeconds - opts.preOffsetSeconds);
+				if (existing.has(rowKey(withoutOffset, row.title, row.artist))) {
+					preOffset += 1;
+					continue;
+				}
+			}
 			existing.add(key);
 
 			await gridApi.exec('add-row', {
@@ -418,7 +442,7 @@
 		}
 
 		renumber();
-		return { added, skipped: rows.length - added };
+		return { added, skipped: rows.length - added - preOffset, preOffset };
 	}
 
 	/** Import the DJ's published Serato playlist for this episode. */
@@ -486,12 +510,26 @@
 				void saveSeratoUrl(body.url, { silent: true });
 			}
 
-			const { added, skipped } = await appendImportedRows(
-				parsed.map((t) => ({ markSeconds: t.markSeconds, artist: t.artist, title: t.title }))
+			const offset = seratoOffsetSeconds;
+			const { added, skipped, preOffset } = await appendImportedRows(
+				parsed.map((t) => ({
+					markSeconds:
+						t.markSeconds === null
+							? null
+							: Math.min(MARK_MAX_SECONDS, t.markSeconds + offset),
+					artist: t.artist,
+					title: t.title
+				})),
+				{ preOffsetSeconds: offset }
 			);
 			seratoNotice = `${added} track${added === 1 ? '' : 's'} added${
 				skipped > 0 ? `, ${skipped} already present` : ''
-			}.`;
+			}${offset > 0 ? ` (+${offset}s intro offset)` : ''}.`;
+			if (preOffset > 0) {
+				seratoNotice += ` ${preOffset} ${
+					preOffset === 1 ? 'row looks' : 'rows look'
+				} pre-offset — use “Shift marks” to correct ${preOffset === 1 ? 'it' : 'them'}.`;
+			}
 		} catch {
 			seratoError = 'Serato import failed.';
 		} finally {
@@ -499,7 +537,7 @@
 		}
 	}
 
-	/** Save (or clear) this episode's Serato playlist URL. */
+	/** Save (or clear) this episode's Serato playlist URL and intro offset. */
 	async function saveSeratoUrl(explicitUrl?: string, opts?: { silent?: boolean }) {
 		seratoError = '';
 		if (!opts?.silent) seratoNotice = '';
@@ -510,9 +548,13 @@
 			const res = await fetch(`/api/shows/${show.id}/broadcasts/${broadcast.id}/serato`, {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ url: value })
+				body: JSON.stringify({ url: value, offsetSeconds: seratoOffsetSeconds })
 			});
-			const body = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
+			const body = (await res.json().catch(() => ({}))) as {
+				url?: string | null;
+				offsetSeconds?: number;
+				error?: string;
+			};
 
 			if (!res.ok) {
 				if (!opts?.silent) seratoError = body.error ?? 'Could not save the URL.';
@@ -520,12 +562,65 @@
 			}
 
 			seratoUrl = body.url ?? '';
+			seratoOffset = body.offsetSeconds ?? 0;
 			if (!opts?.silent) {
 				seratoNotice = seratoUrl ? 'Serato playlist URL saved.' : 'Serato playlist URL cleared.';
 			}
 		} finally {
 			seratoSaving = false;
 		}
+	}
+
+	/**
+	 * Shift every existing mark by the saved intro offset.
+	 *
+	 * For episodes imported before the offset was set (or with a wrong one), this
+	 * repairs the grid without re-typing. Rows without a mark stay blank; the DJ
+	 * still has to save the tracklist.
+	 */
+	async function shiftMarks() {
+		seratoError = '';
+		seratoNotice = '';
+		const delta = seratoOffsetSeconds;
+		if (delta === 0) {
+			seratoError = 'Set an intro offset (seconds) above 0 first.';
+			return;
+		}
+
+		if (gridApi) await gridApi.exec('close-editor', {}).catch(() => {});
+		const rows = gridApi?.getState().data ?? [];
+		const shiftable = rows.filter((row: any) => {
+			const parsed = parseTrackTime(String(row.mark ?? ''));
+			return parsed.ok && parsed.seconds !== null;
+		});
+		if (shiftable.length === 0) {
+			seratoError = 'There are no track marks to shift yet.';
+			return;
+		}
+		if (
+			!confirm(
+				`Shift ${shiftable.length} track mark${shiftable.length === 1 ? '' : 's'} by +${delta}s? ` +
+					'Save the tracklist afterwards to keep the change.'
+			)
+		) {
+			return;
+		}
+
+		let shifted = 0;
+		for (const row of shiftable) {
+			const parsed = parseTrackTime(String(row.mark ?? ''));
+			if (!parsed.ok || parsed.seconds === null) continue;
+			const next = Math.min(MARK_MAX_SECONDS, parsed.seconds + delta);
+			if (next === parsed.seconds) continue;
+			await gridApi.exec('update-row', {
+				id: row.id,
+				row: { mark: formatTrackTime(next) }
+			});
+			shifted += 1;
+		}
+
+		resyncFromGrid();
+		seratoNotice = `${shifted} mark${shifted === 1 ? '' : 's'} shifted by +${delta}s — save the tracklist to keep it.`;
 	}
 
 	/**
@@ -1301,13 +1396,34 @@
 			bind:value={seratoUrl}
 			onkeydown={(e) => e.key === 'Enter' && importSerato()}
 		/>
+		<label for="serato-offset">Intro offset (s)</label>
+		<input
+			id="serato-offset"
+			class="serato-offset"
+			type="number"
+			min="0"
+			max="86400"
+			step="1"
+			inputmode="numeric"
+			bind:value={seratoOffset}
+			title="Seconds of intro in the replay before Serato's first track"
+		/>
 		<Button css="vr-cta ghost" disabled={seratoSaving} onclick={() => saveSeratoUrl()}>
 			{seratoSaving ? 'Saving…' : 'Save URL'}
+		</Button>
+		<Button
+			css="vr-cta ghost"
+			disabled={seratoSaving || seratoOffsetSeconds === 0}
+			onclick={shiftMarks}
+		>
+			Shift marks +{seratoOffsetSeconds}s
 		</Button>
 	</div>
 	<p class="hint">
 		Open your set on serato.com and paste its address. It is stored on this episode, so the
-		import works later without retyping.
+		import works later without retyping. If the replay starts with an intro Serato did not
+		record, set its length here — imports add it to every mark, and “Shift marks” applies it
+		to rows already in the grid.
 	</p>
 	{#if seratoError}
 		<p class="replay-msg bad">{seratoError}</p>
@@ -1511,6 +1627,11 @@
 	.serato-row input:focus-visible {
 		outline: 1px solid var(--vr-line);
 		outline-offset: 1px;
+	}
+
+	.serato-row input.serato-offset {
+		flex: 0 0 5.5rem;
+		width: 5.5rem;
 	}
 
 	/* Replay preview: play/pause, ±5s / ±1 min, scrub — so cues can be stamped
