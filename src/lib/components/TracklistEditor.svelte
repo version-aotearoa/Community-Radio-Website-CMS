@@ -1003,10 +1003,15 @@
 
 		// Reflect resolved names in the grid, unless the DJ is mid-edit.
 		if (resolved.size > 0 && !gridApi?.getState().editor) {
-			editable = editable.map((row) => {
+			// `/api/tracks/:id/stream` already persisted these names, so the
+			// saved baseline must gain them too. Otherwise the enrichment reads
+			// as an unsaved change and the exit confirm fires after every save.
+			const enrich = (row: TrackRow) => {
 				const got = resolved.get(row.id);
 				return got ? { ...row, title: row.title || got.title, artist: row.artist || got.artist } : row;
-			});
+			};
+			tracks = tracks.map(enrich);
+			editable = editable.map(enrich);
 			saveVersion += 1;
 		}
 	}
