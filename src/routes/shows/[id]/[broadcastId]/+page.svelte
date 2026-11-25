@@ -270,6 +270,18 @@
 		return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 	}
 
+	/** Compact archive date for the "More episodes" rows. */
+	function fmtShortDate(dateStr: string) {
+		return new Intl.DateTimeFormat('en-NZ', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			timeZone: 'UTC'
+		})
+			.format(new Date(`${dateStr}T00:00:00Z`))
+			.replace(/\s/g, ' ');
+	}
+
 	function hostOf(url: string) {
 		try {
 			return new URL(url).hostname;
@@ -1056,6 +1068,48 @@
 	{/if}
 </section>
 
+{#if data.recent.length > 0}
+	<section class="more" aria-labelledby="more-episodes">
+		<div class="more-head">
+			<h2 id="more-episodes" class="h-md">More episodes</h2>
+			<a class="more-all mono" href={`/shows/${show.id}`}>All episodes <ArrowChip dir="right" /></a>
+		</div>
+		<ul class="more-list">
+			{#each data.recent as b (b.id)}
+				{@const epArt = episodeArtOrDefault(b.id, b, show)}
+				<li>
+					<a class="more-row" href={`/shows/${show.id}/${b.id}`}>
+						<span class="more-art">
+							{#if epArt}
+								<img
+									src={epArt}
+									alt=""
+									loading="lazy"
+									onerror={(e) => artOnError(e, artFallback)}
+								/>
+							{:else}
+								<span class="more-art-fallback" aria-hidden="true">
+									<svg viewBox="0 0 80 70" fill="currentColor" width="26" height="23">
+										<path
+											fill-rule="evenodd"
+											d="M0 0H40V40H50V0H80V45H70V60H55V70H25V60H10V45H0V5ZM10 5H5V40H15V55H30V65H50V55H65V40H75V5H55V45H35V5H15Z"
+										/>
+									</svg>
+								</span>
+							{/if}
+						</span>
+						<span class="more-text">
+							<span class="more-title">{b.title ?? show.title}</span>
+							<span class="more-date mono">{fmtShortDate(b.date)}</span>
+						</span>
+						<ArrowChip dir="up-right" />
+					</a>
+				</li>
+			{/each}
+		</ul>
+	</section>
+{/if}
+
 {#if deepLinkPrompt}
 	<PlayFromHere
 		seconds={deepLinkPrompt.seconds}
@@ -1706,5 +1760,109 @@
 	.lightbox-close:hover {
 		background: var(--vr-text);
 		color: var(--vr-black);
+	}
+
+	/* "More episodes": the show's own archive, compact rows under the card. */
+	.more {
+		margin-top: 2.5rem;
+		padding-top: 1.75rem;
+		border-top: 1px solid var(--vr-line-muted);
+	}
+
+	.more-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.more-all {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		color: var(--vr-muted);
+		text-decoration: none;
+		font-size: 0.78rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		white-space: nowrap;
+	}
+
+	.more-all:hover {
+		color: var(--vr-text);
+	}
+
+	.more-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+
+	.more-list li + li {
+		border-top: 1px solid var(--vr-line-muted);
+	}
+
+	.more-row {
+		display: grid;
+		grid-template-columns: 52px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.9rem;
+		padding: 0.7rem 0.25rem;
+		text-decoration: none;
+		color: var(--vr-text);
+	}
+
+	.more-row:hover {
+		background: var(--vr-text);
+		color: var(--vr-black);
+	}
+
+	.more-row:hover .more-date {
+		color: inherit;
+	}
+
+	.more-row:focus-visible {
+		outline: 2px solid var(--vr-text);
+		outline-offset: 2px;
+	}
+
+	.more-art {
+		display: grid;
+		place-items: center;
+		width: 52px;
+		height: 52px;
+		overflow: hidden;
+		background: var(--vr-surface-low);
+	}
+
+	.more-art img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.more-art-fallback {
+		display: grid;
+		place-items: center;
+		color: var(--vr-muted);
+	}
+
+	.more-text {
+		display: grid;
+		gap: 0.15rem;
+		min-width: 0;
+	}
+
+	.more-title {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.more-date {
+		color: var(--vr-faint);
+		font-size: 0.78rem;
 	}
 </style>
