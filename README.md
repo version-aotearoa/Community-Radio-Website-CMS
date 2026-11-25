@@ -77,17 +77,21 @@ AzuraCast backend is the only hard-coded dependency, and it lives in one file.
 | Public domains (`versionradio.live`, `dev.versionradio.live`) | Cloudflare Pages custom domains + your DNS |
 | Show importer's source instance | `scripts/import-shows.mjs` |
 
-**AzuraCast** — the app talks to a single backend, configured by three exports in
+**AzuraCast** — the app talks to a single backend, configured by these exports in
 `src/lib/azuracast.ts`:
 
 ```ts
 export const AZURACAST_BASE = 'https://stream.versionradio.live'; // ← your AzuraCast origin
+export const AZURACAST_MEDIA_BASE = 'https://media.versionradio.live'; // ← optional proxied playback host
 export const AZURACAST_STATION_ID = '1';                          // ← your station id
 export const AZURACAST_STATION_SHORTCODE = 'version_radio';
 ```
 
 Point those at your instance and the rest follows: live HLS proxying, on-demand
-replay URLs, artwork, and waveform peaks are all derived from them. The
+replay URLs, artwork, and waveform peaks are all derived from them.
+`AZURACAST_MEDIA_BASE` is only used for native HLS playback (iOS/Safari) and
+defaults to `AZURACAST_BASE` when you change the origin; a Cloudflare-proxied
+hostname in front of AzuraCast keeps that path fast from distant locations. The
 on-demand/replay endpoints used publicly need no API key; only waveform peaks
 send `AZURACAST_API_KEY` (a station key with access to media data), and the site
 falls back to a decorative waveform without it.
