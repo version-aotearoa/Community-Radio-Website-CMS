@@ -136,7 +136,7 @@
 		<a class="view-all" href="/shows">View all</a>
 	</div>
 	<div class="shows-grid">
-		{#each data.latest as show (show.show_id)}
+		{#each data.latest as show (show.broadcast_id)}
 			{@const cardArt = episodeArtOrDefault(show.broadcast_id, show, { image: show.show_image })}
 			<a class="showcard" href={`/shows/${show.show_id}/${show.broadcast_id}`}>
 				<div class="showcard-art">
