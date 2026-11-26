@@ -1,4 +1,14 @@
 export const AZURACAST_BASE = 'https://stream.versionradio.live';
+/**
+ * Public media hostname for playback (a Cloudflare-proxied tunnel to the same
+ * AzuraCast origin). Native HLS uses this: iOS can't run hls.js, and the direct
+ * NZ → Amsterdam origin path is too slow for the stream bitrate. Forks that
+ * point AZURACAST_BASE elsewhere fall back to it automatically.
+ */
+export const AZURACAST_MEDIA_BASE =
+	AZURACAST_BASE === 'https://stream.versionradio.live'
+		? 'https://media.versionradio.live'
+		: AZURACAST_BASE;
 export const AZURACAST_STATION_ID = '1';
 export const AZURACAST_STATION_SHORTCODE = 'version_radio';
 
