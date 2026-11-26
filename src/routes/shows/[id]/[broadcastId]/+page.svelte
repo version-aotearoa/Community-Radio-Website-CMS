@@ -187,26 +187,24 @@
 		pinnedCommentAt = null;
 	}
 
-	/** Row whose cue marker was last clicked — pinned until playback stops. */
-	let activeMarkId = $state<string | null>(null);
-	let markWasPlaying = false;
-
 	/**
-	 * Clear the active row when the recording stops (pause/end) or playback
-	 * moves off it. The latch keeps the buffering gap between a mark click and
-	 * the first `playing` event from clearing it immediately.
+	 * Row under the playback head: the last marked row at or before the current
+	 * position. Active only while this episode's replay is loaded; pausing keeps
+	 * the current row lit. Rows without marks stay inactive.
 	 */
-	$effect(() => {
-		const current = $playback;
+	const activeTrackId = $derived.by(() => {
 		const url = broadcast.replay_url;
-		const onThisReplay = !!url && current.kind === 'media' && current.url === url;
-		const playingNow = $streamPlaying;
-		if (onThisReplay && playingNow) markWasPlaying = true;
-		if (activeMarkId !== null && (!onThisReplay || (markWasPlaying && !playingNow))) {
-			activeMarkId = null;
-			markWasPlaying = false;
+		if (!url) return null;
+		const current = $playback;
+		if (current.kind !== 'media' || current.url !== url) return null;
+		const pos = $playerPosition;
+		if (pos.url !== url) return null;
+
+		let active: string | null = null;
+		for (const t of tracks) {
+			if (t.mark_seconds !== null && t.mark_seconds <= pos.seconds) active = t.id;
 		}
-		if (!onThisReplay) markWasPlaying = false;
+		return active;
 	});
 
 	// Replay availability is probed after paint (never during render).
@@ -490,10 +488,9 @@
 	 * already loaded, seek in place (no reload); otherwise start it at the mark.
 	 * `trackId` is null for deep links, where the row is found by its mark.
 	 */
-	function seekReplay(trackId: string | null, seconds: number) {
+	function seekReplay(seconds: number) {
 		const url = broadcast.replay_url;
 		if (!url || $unavailableReplays.has(url)) return;
-		activeMarkId = trackId ?? tracks.find((t) => t.mark_seconds === seconds)?.id ?? null;
 		const current = $playback;
 		if (current.kind === 'media' && current.url === url) {
 			requestSetPlaying(true);
@@ -607,7 +604,7 @@
 	function startDeepLink(seconds: number) {
 		if (!broadcast.replay_url || replayUnavailable) return;
 		deepLink = { seconds, track: tracks.find((t) => t.mark_seconds === seconds) ?? null };
-		seekReplay(null, seconds);
+		seekReplay(seconds);
 		// A blocked browser either rejects play() (playbackBlocked) or silently
 		// stays paused — this timer covers the silent case.
 		if (deepLinkTimer) clearTimeout(deepLinkTimer);
@@ -635,7 +632,7 @@
 		deepLinkPrompt = null;
 		deepLinkDismissed = true;
 		if (!target) return;
-		seekReplay(null, target.seconds);
+		seekReplay(target.seconds);
 	}
 
 	function dismissDeepLink() {
@@ -695,11 +692,9 @@
 			{#if replayPlayable}
 				<button
 					class="mark"
-					class:pressed={activeMarkId === t.id}
-					aria-pressed={activeMarkId === t.id}
 					aria-label={`Play the recording from ${formatTrackTime(t.mark_seconds)}`}
 					title={`Play the recording from ${formatTrackTime(t.mark_seconds)}`}
-					onclick={() => seekReplay(t.id, t.mark_seconds!)}
+					onclick={() => seekReplay(t.mark_seconds!)}
 				>
 					{formatTrackTime(t.mark_seconds)}
 				</button>
@@ -879,7 +874,7 @@
 			currentTime={chatPosition ?? 0}
 			comments={commentMessages}
 			seed={data.chatRoom}
-			onSeek={(seconds) => seekReplay(null, seconds)}
+			onSeek={(seconds) => seekReplay(seconds)}
 			onComment={focusCommentComposer}
 			onReply={replyToComment}
 			onShare={(comment) => void copyCommentLink(comment.id, comment.at)}
@@ -933,8 +928,8 @@
 				{#if t.url && isBandcampPageUrl(t.url)}
 					<li
 						class="track-row"
-						class:active={activeMarkId === t.id}
-						aria-current={activeMarkId === t.id ? 'true' : undefined}
+						class:active={activeTrackId === t.id}
+						aria-current={activeTrackId === t.id ? 'true' : undefined}
 						data-track-mark={t.mark_seconds}
 					>
 						<span class="num">{i + 1}</span>
@@ -993,8 +988,8 @@
 				{:else}
 					<li
 						class="track-row"
-						class:active={activeMarkId === t.id}
-						aria-current={activeMarkId === t.id ? 'true' : undefined}
+						class:active={activeTrackId === t.id}
+						aria-current={activeTrackId === t.id ? 'true' : undefined}
 						data-track-mark={t.mark_seconds}
 					>
 						<span class="num">{i + 1}</span>
@@ -1045,7 +1040,7 @@
 						mode="comments"
 						initialMessages={data.initialMessages}
 						position={commentPosition}
-						onseek={(seconds) => seekReplay(null, seconds)}
+						onseek={(seconds) => seekReplay(seconds)}
 						onMessages={(messages) => (commentMessages = messages)}
 						onPosted={onCommentPosted}
 						focusNonce={focusCommentsNonce}
@@ -1243,6 +1238,7 @@
 		font-family: var(--vr-font-mono);
 		font-size: 0.78rem;
 		width: 1.5rem;
+		padding-left: 0.5em;
 		flex-shrink: 0;
 		font-variant-numeric: tabular-nums;
 	}
@@ -1270,14 +1266,6 @@
 	.mark:hover {
 		color: var(--vr-text);
 		text-decoration-color: currentColor;
-	}
-
-	.mark.pressed {
-		background: var(--vr-text);
-		color: var(--vr-black);
-		padding: 0.05rem 0.25rem;
-		margin: -0.05rem -0.25rem;
-		text-decoration: none;
 	}
 
 	.mark.plain {
@@ -1322,10 +1310,57 @@
 		display: block;
 	}
 
-	/* Row whose cue marker was clicked: stays lit while the recording plays. */
+	/* Row under the playback head: the whole row inverts. No accent bar — the
+	   light band is the marker. Children set their own ink, so override them. */
 	.tracklist li.active {
-		background: var(--vr-surface-high);
-		box-shadow: inset 2px 0 0 var(--vr-text);
+		background: var(--vr-text);
+		color: var(--vr-black);
+	}
+
+	.tracklist li.active :is(.num, .artist, .album, .track-err) {
+		color: var(--vr-black);
+		opacity: 0.65;
+	}
+
+	.tracklist li.active :is(.mark, .track-title, .bc-title, .url-fallback, .url-host, .track-play, .cue-btn) {
+		color: var(--vr-black);
+	}
+
+	.tracklist li.active .mark:hover {
+		color: var(--vr-black);
+	}
+
+	.tracklist li.active .cue-btn:hover:not(:disabled) {
+		border-color: var(--vr-black);
+		color: var(--vr-black);
+	}
+
+	.tracklist li.active .cue-btn:disabled {
+		color: var(--vr-black);
+		opacity: 0.4;
+	}
+
+	.tracklist li.active .cue-btn.heart.active {
+		color: var(--vr-red);
+	}
+
+	.tracklist li.active .track-play {
+		border-color: var(--vr-black);
+	}
+
+	.tracklist li.active .track-play:hover,
+	.tracklist li.active .track-play.playing {
+		background: var(--vr-black);
+		color: var(--vr-text);
+		border-color: var(--vr-black);
+	}
+
+	.tracklist li.active .bc-art {
+		border-color: var(--vr-black);
+	}
+
+	.tracklist li.active :is(button, a):focus-visible {
+		outline-color: var(--vr-black);
 	}
 
 	.artist,
