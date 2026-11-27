@@ -3,6 +3,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import Seo from '$lib/components/Seo.svelte';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
+	import { fetchReplayLengths, replayMinutes } from '$lib/replayLengths';
 
 	let { data } = $props();
 
@@ -41,6 +42,16 @@
 	const isEpisodes = $derived(data.view === 'episodes');
 	let episodeShow = $state('all');
 	let episodeYear = $state('all');
+
+	// Start with the scheduled length (SSR), then hydrate with real recording
+	// lengths from AzuraCast after paint.
+	let replayLengths = $state<Record<string, number>>({});
+	let replayLengthsRequested = false;
+	$effect(() => {
+		if (!isEpisodes || replayLengthsRequested) return;
+		replayLengthsRequested = true;
+		void fetchReplayLengths().then((lengths) => (replayLengths = lengths));
+	});
 
 	const episodes = $derived(data.episodes ?? []);
 
@@ -401,7 +412,9 @@
 								{/if}
 							</span>
 							<span class="ep-meta mono">
-								{#if e.replay_url}▶ Replay · {/if}{fmtDuration(e.duration_minutes)}
+								{#if e.replay_url}▶ Replay · {/if}{fmtDuration(
+									replayMinutes(e.replay_url, replayLengths, e.duration_minutes)
+								)}
 							</span>
 						</a>
 					</li>

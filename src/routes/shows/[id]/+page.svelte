@@ -9,6 +9,7 @@
 	import { playback, playMedia, requestSetPlaying, streamPlaying } from '$lib/stores/player';
 	import { EVENT_TYPES, eventTypeLabel } from '$lib/eventTypes';
 	import { episodeArtOrDefault } from '$lib/azuracast';
+	import { fetchReplayLengths, replayMinutes } from '$lib/replayLengths';
 	import { probeReplayAvailability, unavailableReplays } from '$lib/replayAvailability';
 	import { artOnError } from '$lib/art';
 	import Seo from '$lib/components/Seo.svelte';
@@ -19,9 +20,16 @@
 	const upcoming = $derived(data.upcoming);
 	const past = $derived(data.past);
 
+	// Scheduled lengths render on the server; real recording lengths arrive
+	// after paint from the cached replay-lengths endpoint.
+	let replayLengths = $state<Record<string, number>>({});
+
 	// Replay availability is probed after paint (never during render).
 	onMount(() => {
 		probeReplayAvailability([...data.upcoming, ...data.past].map((b) => b.replay_url));
+		if (data.past.some((b) => b.replay_url)) {
+			void fetchReplayLengths().then((lengths) => (replayLengths = lengths));
+		}
 		// Deferred past the navigation's microtasks: an immediate invalidateAll
 		// aborts the in-flight navigation before SvelteKit resets scroll to top.
 		setTimeout(() => void invalidateAll(), 0);
@@ -406,6 +414,13 @@
 										{/if}
 									</button>
 								{/if}
+								{#if b.replay_url}
+									<span class="replay-length mono"
+										>{fmtDuration(
+											replayMinutes(b.replay_url, replayLengths, b.duration_minutes)
+										)}</span
+									>
+								{/if}
 								<a class="view-show mono" href={`/shows/${show.id}/${b.id}`}>View <ArrowChip dir="right" /></a>
 							</div>
 						</div>
@@ -693,6 +708,12 @@
 		margin-top: 0.85rem;
 		padding-top: 0.75rem;
 		border-top: 1px solid var(--vr-line-muted);
+	}
+
+	.replay-length {
+		color: var(--vr-muted);
+		font-size: 0.72rem;
+		white-space: nowrap;
 	}
 
 	.broadcast.past {
